@@ -34,6 +34,13 @@ class AffiliateFactory extends Factory
         ];
     }
 
+    public function pipeline(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'status' => AffiliateStatus::Pipeline,
+        ]);
+    }
+
     public function onHold(): static
     {
         return $this->state(fn (array $attributes): array => [

@@ -9,18 +9,23 @@ use App\Filament\Resources\Affiliates\Pages\ViewAffiliate;
 use App\Filament\Resources\Affiliates\Schemas\AffiliateForm;
 use App\Filament\Resources\Affiliates\Schemas\AffiliateInfolist;
 use App\Filament\Resources\Affiliates\Tables\AffiliatesTable;
+use App\Filament\Resources\Affiliates\Widgets\AffiliateStatusOverview;
+use App\Filament\Resources\Affiliates\Widgets\PipelineAffiliates;
 use App\Models\Affiliate;
-use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 class AffiliateResource extends Resource
 {
     protected static ?string $model = Affiliate::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserGroup;
+    protected static string|UnitEnum|null $navigationGroup = 'Affiliates';
+
+    protected static ?string $navigationLabel = 'All affiliates';
+
+    protected static ?int $navigationSort = 1;
 
     protected static ?string $recordTitleAttribute = 'name';
 
@@ -43,6 +48,14 @@ class AffiliateResource extends Resource
     {
         return [
             //
+        ];
+    }
+
+    public static function getWidgets(): array
+    {
+        return [
+            AffiliateStatusOverview::class,
+            PipelineAffiliates::class,
         ];
     }
 

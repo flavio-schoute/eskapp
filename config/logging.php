@@ -73,6 +73,14 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'integrations' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/integrations.log'),
+            'level' => 'warning',
+            'max_files' => 30,
+            'replace_placeholders' => true,
+        ],
+
         'monthly' => [
             'driver' => 'monthly',
             'path' => storage_path('logs/laravel.log'),

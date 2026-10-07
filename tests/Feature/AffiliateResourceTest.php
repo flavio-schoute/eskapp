@@ -7,11 +7,14 @@ use App\Filament\Resources\Affiliates\Pages\CreateAffiliate;
 use App\Filament\Resources\Affiliates\Pages\EditAffiliate;
 use App\Filament\Resources\Affiliates\Pages\ListAffiliates;
 use App\Filament\Resources\Affiliates\Pages\ViewAffiliate;
+use App\Filament\Resources\Affiliates\Widgets\AffiliateStatusOverview;
+use App\Filament\Resources\Affiliates\Widgets\PipelineAffiliates;
 use App\Models\Affiliate;
 use App\Models\User;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
 use function Pest\Laravel\actingAs;
@@ -21,6 +24,12 @@ use function Pest\Laravel\get;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Http::preventStrayRequests();
+    config([
+        'services.google_drive.refresh_token' => null,
+        'services.slack.notifications.bot_user_oauth_token' => null,
+    ]);
+
     actingAs(User::factory()->create());
 });
 
@@ -141,4 +150,94 @@ it('can delete an affiliate from the list', function () {
         ->callAction(TestAction::make(DeleteAction::class)->table($affiliate));
 
     assertDatabaseMissing($affiliate);
+});
+
+it('lists only pipeline affiliates in the pipeline block', function () {
+    $pipeline = Affiliate::factory()->pipeline()->count(2)->create();
+    $active = Affiliate::factory()->create();
+
+    Livewire::test(PipelineAffiliates::class)
+        ->assertCanSeeTableRecords($pipeline)
+        ->assertCanNotSeeTableRecords([$active]);
+});
+
+it('keeps pipeline affiliates out of the default active list', function () {
+    $pipeline = Affiliate::factory()->pipeline()->create();
+
+    Livewire::test(ListAffiliates::class)
+        ->assertCanNotSeeTableRecords([$pipeline]);
+});
+
+it('can make a pipeline affiliate active from the pipeline block', function () {
+    $affiliate = Affiliate::factory()->pipeline()->create();
+
+    Livewire::test(PipelineAffiliates::class)
+        ->callAction(TestAction::make('activate')->table($affiliate))
+        ->assertDispatched('affiliate-status-updated')
+        ->assertCanNotSeeTableRecords([$affiliate]);
+
+    expect($affiliate->refresh()->status)->toBe(AffiliateStatus::Active);
+});
+
+it('shows the number of affiliates per status', function () {
+    Affiliate::factory()->count(3)->create();
+    Affiliate::factory()->pipeline()->count(2)->create();
+
+    Livewire::test(AffiliateStatusOverview::class)
+        ->assertSeeInOrder(['In pipeline', '2', 'Active', '3', 'On hold', '0', 'Stopped', '0']);
+});
+
+it('prefills the pipeline status when adding from the pipeline block', function () {
+    Livewire::withQueryParams(['status' => AffiliateStatus::Pipeline->value])
+        ->test(CreateAffiliate::class)
+        ->assertSchemaStateSet(['status' => AffiliateStatus::Pipeline]);
+});
+
+it('saves optional invoice details and shows the formatted address', function () {
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm([
+            'name' => 'DayOne',
+            'type' => AffiliateType::Software->value,
+            'status' => AffiliateStatus::Active->value,
+            'login_url' => 'https://dayone.test',
+            'username' => 'eskapp',
+            'password' => 'secret',
+            'payment_method' => AffiliatePaymentMethod::Invoice->value,
+            'invoice_company_name' => 'DAYONE FULFILLMENT CO.,LTD',
+            'invoice_address_line_1' => 'Rm808 Block A Zhongguanxilu 1277#',
+            'invoice_postal_code' => '315201',
+            'invoice_city' => 'Ningbo',
+            'invoice_region' => 'Zhenhaiqu',
+            'invoice_country' => 'CN',
+            'invoice_contact_person' => 'Li Wei',
+            'invoice_phone' => '+86 574 1234 5678',
+            'invoice_email' => 'billing@dayone.test',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $affiliate = Affiliate::sole();
+
+    expect($affiliate->invoice_country)->toBe('CN')
+        ->and($affiliate->invoice_email)->toBe('billing@dayone.test');
+
+    Livewire::test(ViewAffiliate::class, ['record' => $affiliate->getRouteKey()])
+        ->assertSee('Rm808 Block A Zhongguanxilu 1277# Zhenhaiqu Ningbo, 315201, China')
+        ->assertSee('Li Wei');
+});
+
+it('validates the invoice email address', function () {
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm(['invoice_email' => 'not-an-email'])
+        ->call('create')
+        ->assertHasFormErrors(['invoice_email' => 'email']);
+});
+
+it('groups affiliates and slack members under one affiliates menu', function () {
+    // Filament only lets users without a panel access check in on the local environment.
+    config(['app.env' => 'local']);
+
+    get('/admin/affiliates')
+        ->assertOk()
+        ->assertSeeInOrder(['e-Skool Tools', 'Affiliates', 'All affiliates', 'Slack members']);
 });

@@ -11,7 +11,7 @@ use Illuminate\Database\Seeder;
 class AffiliateSeeder extends Seeder
 {
     /**
-     * Seed an example affiliate to preview the list.
+     * Seed example affiliates to preview the list and the pipeline.
      */
     public function run(): void
     {
@@ -27,6 +27,20 @@ class AffiliateSeeder extends Seeder
                 'payment_method' => AffiliatePaymentMethod::Automatic,
                 'affiliate_link' => 'https://demo-partner.test/?ref=eskapp',
                 'notes' => 'Dummy record for previewing the affiliates list.',
+            ],
+        );
+
+        Affiliate::firstOrCreate(
+            ['name' => 'Pipeline Prospect BV'],
+            [
+                'type' => AffiliateType::Partnership,
+                'status' => AffiliateStatus::Pipeline,
+                'login_url' => 'https://partners.pipeline-prospect.test/login',
+                'username' => 'eskapp-prospect',
+                'password' => 'demo-password-456',
+                'agreement' => 'Proposal: 15% per sale, payout by invoice.',
+                'payment_method' => AffiliatePaymentMethod::Invoice,
+                'notes' => 'Dummy record for previewing the pipeline block.',
             ],
         );
     }

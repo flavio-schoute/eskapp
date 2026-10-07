@@ -5,15 +5,18 @@ namespace App\Filament\Resources\Affiliates\Tables;
 use App\Enums\AffiliatePaymentMethod;
 use App\Enums\AffiliateStatus;
 use App\Enums\AffiliateType;
+use App\Filament\Resources\Affiliates\AffiliateResource;
+use App\Models\Affiliate;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ViewAction;
+use Filament\Notifications\Notification;
 use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Livewire\Component;
 
 class AffiliatesTable
 {
@@ -21,6 +24,7 @@ class AffiliatesTable
     {
         return $table
             ->defaultSort('name')
+            ->recordUrl(fn (Affiliate $record): string => AffiliateResource::getUrl('view', ['record' => $record]))
             ->columns([
                 TextColumn::make('name')
                     ->label('Partner name')
@@ -32,6 +36,14 @@ class AffiliatesTable
                 SelectColumn::make('status')
                     ->options(AffiliateStatus::class)
                     ->selectablePlaceholder(false)
+                    ->afterStateUpdated(function (Component $livewire, Affiliate $record): void {
+                        $livewire->dispatch('affiliate-status-updated');
+
+                        Notification::make()
+                            ->success()
+                            ->title("{$record->name} is now {$record->status->getLabel()}")
+                            ->send();
+                    })
                     ->sortable(),
                 TextColumn::make('payment_method')
                     ->label('Payment')
@@ -41,7 +53,7 @@ class AffiliatesTable
                     ->limit(50)
                     ->tooltip(fn (?string $state): ?string => $state)
                     ->placeholder('-')
-                    ->toggleable(),
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('login_url')
                     ->label('Login URL')
                     ->url(fn (?string $state): ?string => $state, shouldOpenInNewTab: true)
@@ -65,13 +77,14 @@ class AffiliatesTable
                     ->options(AffiliatePaymentMethod::class),
             ])
             ->recordActions([
-                ViewAction::make(),
                 EditAction::make(),
-                DeleteAction::make(),
+                DeleteAction::make()
+                    ->successNotificationTitle(fn (Affiliate $record): string => "Affiliate {$record->name} deleted"),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        ->successNotificationTitle('Selected affiliates deleted'),
                 ]),
             ]);
     }
