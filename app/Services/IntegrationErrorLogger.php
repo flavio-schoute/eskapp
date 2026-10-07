@@ -20,7 +20,7 @@ class IntegrationErrorLogger
         Log::channel('integrations')->error("{$integration->getLabel()}: {$action} failed", [
             'affiliate_id' => $affiliate?->getKey(),
             'affiliate' => $affiliate?->name,
-            'message' => $exception->getMessage(),
+            'message' => self::readableMessage($exception),
             'exception' => $exception,
         ]);
 
@@ -29,7 +29,7 @@ class IntegrationErrorLogger
             ->where('integration', $integration)
             ->where('action', $action)
             ->where('affiliate_id', $affiliate?->getKey())
-            ->where('message', $exception->getMessage())
+            ->where('message', self::readableMessage($exception))
             ->first();
 
         if ($error) {
@@ -42,9 +42,27 @@ class IntegrationErrorLogger
             'affiliate_id' => $affiliate?->getKey(),
             'integration' => $integration,
             'action' => $action,
-            'message' => $exception->getMessage(),
+            'message' => self::readableMessage($exception),
             'exception_class' => $exception::class,
             'last_occurred_at' => now(),
         ]);
+    }
+
+    /**
+     * The error message for people: services sometimes answer with an HTML error page instead of an error message.
+     */
+    public static function readableMessage(Throwable $exception): string
+    {
+        $message = $exception->getMessage();
+
+        if (! str_contains($message, '<html') && ! str_contains($message, '<!DOCTYPE')) {
+            return $message;
+        }
+
+        preg_match('/"(\d{3}) ([^"]+)"/', $message, $status);
+
+        return $status
+            ? "The service returned a server error ({$status[1]} {$status[2]}) instead of a response. This is a problem on their side."
+            : 'The service returned an error page instead of a response. This is a problem on their side.';
     }
 }

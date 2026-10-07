@@ -76,7 +76,7 @@ trait SyncsAffiliateIntegrations
             Notification::make()
                 ->warning()
                 ->title("Saved, but {$integration->getLabel()} sync failed")
-                ->body("{$action}: {$exception->getMessage()} The error is logged under System → Integration errors.")
+                ->body("{$action}: ".IntegrationErrorLogger::readableMessage($exception).' The error is logged under System → Integration errors.')
                 ->persistent()
                 ->send();
 

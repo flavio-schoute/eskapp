@@ -362,7 +362,7 @@ class InvoiceSettings extends Page implements HasTable
                     Notification::make()
                         ->danger()
                         ->title("Could not create the invoice for {$affiliate->name}")
-                        ->body("Mollie: {$exception->getMessage()} Nothing was sent. The error is logged under System → Integration errors.")
+                        ->body('Mollie: '.IntegrationErrorLogger::readableMessage($exception).' The app did not store an invoice; check Mollie Invoicing → Facturen before trying again. The error is logged under System → Integration errors.')
                         ->persistent()
                         ->send();
 

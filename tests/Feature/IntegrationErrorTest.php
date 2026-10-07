@@ -139,3 +139,12 @@ it('keeps the error when the affiliate is deleted', function () {
 
     expect($error->refresh()->affiliate_id)->toBeNull();
 });
+
+it('turns an html error page into a readable message', function () {
+    $html = "Invalid JSON response from Mollie: '<!DOCTYPE html><html><head><title>An Error Occurred: Internal Server Error</title></head>"
+        .'<body><h2>The server returned a "500 Internal Server Error".</h2></body></html>\'.';
+
+    expect(IntegrationErrorLogger::readableMessage(new RuntimeException($html)))
+        ->toBe('The service returned a server error (500 Internal Server Error) instead of a response. This is a problem on their side.')
+        ->and(IntegrationErrorLogger::readableMessage(new RuntimeException('missing_scope')))->toBe('missing_scope');
+});
