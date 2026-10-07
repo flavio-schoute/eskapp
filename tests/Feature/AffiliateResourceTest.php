@@ -14,6 +14,7 @@ use App\Models\User;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
@@ -34,7 +35,7 @@ beforeEach(function () {
 });
 
 it('requires authentication to view the affiliates list', function () {
-    auth()->logout();
+    Auth::logout();
 
     get('/admin/affiliates')->assertRedirect('/admin/login');
 });
