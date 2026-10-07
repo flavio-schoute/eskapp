@@ -5,13 +5,18 @@ namespace App\Models;
 use App\Enums\AffiliatePaymentMethod;
 use App\Enums\AffiliateStatus;
 use App\Enums\AffiliateType;
+use App\Enums\InvoiceLanguage;
+use App\Enums\MollieExportStatus;
 use App\Observers\AffiliateObserver;
+use App\Services\MollieInvoicingCustomersExport;
 use App\Support\InvoiceAddressFormat;
 use Database\Factories\AffiliateFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 #[Fillable([
@@ -24,6 +29,8 @@ use Illuminate\Support\Str;
     'agreement',
     'payment_method',
     'invoice_company_name',
+    'invoice_kvk_number',
+    'invoice_vat_number',
     'invoice_address_line_1',
     'invoice_address_line_2',
     'invoice_postal_code',
@@ -33,6 +40,7 @@ use Illuminate\Support\Str;
     'invoice_contact_person',
     'invoice_phone',
     'invoice_email',
+    'invoice_language',
     'affiliate_link',
     'notes',
     'google_drive_folder_id',
@@ -41,6 +49,9 @@ use Illuminate\Support\Str;
     'agreement_drive_url',
     'slack_channel_id',
     'slack_channel_name',
+    'mollie_customer_id',
+    'mollie_exported_at',
+    'mollie_export_fingerprint',
 ])]
 #[ObservedBy(AffiliateObserver::class)]
 class Affiliate extends Model
@@ -59,6 +70,8 @@ class Affiliate extends Model
             'type' => AffiliateType::class,
             'status' => AffiliateStatus::class,
             'payment_method' => AffiliatePaymentMethod::class,
+            'invoice_language' => InvoiceLanguage::class,
+            'mollie_exported_at' => 'datetime',
             'password' => 'encrypted',
         ];
     }
@@ -124,5 +137,57 @@ class Affiliate extends Model
         }
 
         return "https://slack.com/app_redirect?channel={$this->slack_channel_id}";
+    }
+
+    /**
+     * Get the labels of the invoice fields that still need to be filled in before this affiliate can be invoiced.
+     *
+     * @return list<string>
+     */
+    public function missingInvoiceDetails(): array
+    {
+        return array_keys(array_filter([
+            'company name' => blank($this->invoice_company_name),
+            'email address' => blank($this->invoice_email),
+            'street and house number' => blank($this->invoice_address_line_1),
+            'postal code' => blank($this->invoice_postal_code),
+            'city' => blank($this->invoice_city),
+            'country' => blank($this->invoice_country),
+        ]));
+    }
+
+    public function hasCompleteInvoiceDetails(): bool
+    {
+        return $this->missingInvoiceDetails() === [];
+    }
+
+    /**
+     * Whether this affiliate is in the latest Mollie Invoicing customer export, and whether its details changed since.
+     */
+    public function mollieExportStatus(): MollieExportStatus
+    {
+        if (blank($this->mollie_export_fingerprint)) {
+            return MollieExportStatus::NotExported;
+        }
+
+        return hash_equals($this->mollie_export_fingerprint, app(MollieInvoicingCustomersExport::class)->fingerprint($this))
+            ? MollieExportStatus::Exported
+            : MollieExportStatus::ChangedSinceExport;
+    }
+
+    /**
+     * @return HasMany<AffiliateInvoice, $this>
+     */
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(AffiliateInvoice::class);
+    }
+
+    /**
+     * @return HasOne<AffiliateInvoice, $this>
+     */
+    public function latestInvoice(): HasOne
+    {
+        return $this->hasOne(AffiliateInvoice::class)->latestOfMany();
     }
 }

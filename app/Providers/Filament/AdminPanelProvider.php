@@ -33,6 +33,7 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login()
             ->brandName('e-Skool Tools')
+            ->renderHook(PanelsRenderHook::HEAD_END, fn () => view('filament.favicons'))
             ->renderHook(
                 PanelsRenderHook::STYLES_AFTER,
                 fn () => view('filament.notification-countdown-styles', ['duration' => AppServiceProvider::NotificationDuration]),

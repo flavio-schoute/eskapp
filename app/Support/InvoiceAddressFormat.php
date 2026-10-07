@@ -135,4 +135,17 @@ class InvoiceAddressFormat
 
         return array_values(array_filter([$part('company_name'), ...$lines], fn (string $line): bool => $line !== ''));
     }
+
+    public static function phonePlaceholder(?string $countryCode): string
+    {
+        return match ($countryCode) {
+            'NL' => '+31 6 12345678',
+            'BE' => '+32 470 12 34 56',
+            'DE' => '+49 151 23456789',
+            'GB' => '+44 7700 900123',
+            'US', 'CA' => '+1 212 555 0123',
+            'CN' => '+86 139 1234 5678',
+            default => '+ country code and number',
+        };
+    }
 }

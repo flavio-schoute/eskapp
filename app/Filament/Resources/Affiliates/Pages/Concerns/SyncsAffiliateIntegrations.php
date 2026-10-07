@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Affiliates\Pages\Concerns;
 use App\Enums\Integration;
 use App\Models\Affiliate;
 use App\Services\AffiliateGoogleDriveSync;
+use App\Services\AffiliateMollieSync;
 use App\Services\AffiliateSlackSync;
 use App\Services\IntegrationErrorLogger;
 use Closure;
@@ -33,7 +34,7 @@ trait SyncsAffiliateIntegrations
     }
 
     /**
-     * Make sure the Drive folder and Slack channel exist, and upload a pending agreement.
+     * Make sure the Drive folder, Slack channel and (for invoiced affiliates) Mollie customer exist, and upload a pending agreement.
      */
     protected function syncIntegrations(): void
     {
@@ -50,6 +51,12 @@ trait SyncsAffiliateIntegrations
         $this->runIntegrationStep(Integration::Slack, 'Create channel', function (Affiliate $affiliate): void {
             app(AffiliateSlackSync::class)->ensureChannel($affiliate);
         });
+
+        if (app(AffiliateMollieSync::class)->shouldSync($this->getRecord())) {
+            $this->runIntegrationStep(Integration::Mollie, 'Create customer', function (Affiliate $affiliate): void {
+                app(AffiliateMollieSync::class)->ensureCustomer($affiliate);
+            });
+        }
     }
 
     /**

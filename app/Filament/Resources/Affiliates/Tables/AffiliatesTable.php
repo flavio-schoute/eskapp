@@ -16,6 +16,7 @@ use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Livewire\Component;
 
 class AffiliatesTable
@@ -23,7 +24,7 @@ class AffiliatesTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->defaultSort('name')
+            ->defaultSort('payment_method')
             ->recordUrl(fn (Affiliate $record): string => AffiliateResource::getUrl('view', ['record' => $record]))
             ->columns([
                 TextColumn::make('name')
@@ -48,7 +49,12 @@ class AffiliatesTable
                 TextColumn::make('payment_method')
                     ->label('Payment')
                     ->placeholder('-')
-                    ->sortable(),
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query
+                        ->orderByRaw(
+                            'case payment_method when ? then 0 when ? then 1 when ? then 2 else 3 end '.($direction === 'desc' ? 'desc' : 'asc'),
+                            [AffiliatePaymentMethod::Invoice->value, AffiliatePaymentMethod::Other->value, AffiliatePaymentMethod::Automatic->value],
+                        )
+                        ->orderBy('name')),
                 TextColumn::make('agreement')
                     ->limit(50)
                     ->tooltip(fn (?string $state): ?string => $state)

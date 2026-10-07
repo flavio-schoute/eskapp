@@ -18,4 +18,20 @@ enum AffiliatePaymentMethod: string implements HasLabel
             self::Other => 'Other',
         };
     }
+
+    /**
+     * Whether affiliates paid this way need invoice details (everything except automatic payouts).
+     */
+    public function requiresInvoiceDetails(): bool
+    {
+        return $this !== self::Automatic;
+    }
+
+    /**
+     * Resolve a form or database value to a payment method.
+     */
+    public static function fromState(self|string|null $state): ?self
+    {
+        return $state instanceof self ? $state : self::tryFrom((string) $state);
+    }
 }

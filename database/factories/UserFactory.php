@@ -26,11 +26,21 @@ class UserFactory extends Factory
     {
         return [
             'name' => fake()->name(),
-            'email' => fake()->unique()->safeEmail(),
+            'email' => fake()->unique()->userName().'@'.User::StaffEmailDomain,
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
         ];
+    }
+
+    /**
+     * Indicate that the user is not e-Skool staff and may not use the admin panel.
+     */
+    public function external(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'email' => fake()->unique()->safeEmail(),
+        ]);
     }
 
     /**

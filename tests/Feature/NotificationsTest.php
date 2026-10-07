@@ -36,8 +36,6 @@ it('keeps notifications on screen for 10 seconds', function () {
 });
 
 it('shows the countdown bar styles in the panel', function () {
-    config(['app.env' => 'local']);
-
     get('/admin/affiliates')
         ->assertOk()
         ->assertSee('notification-countdown 10000ms linear', escape: false);
@@ -52,7 +50,7 @@ it('confirms when an affiliate is created', function () {
             'login_url' => 'https://acme.test',
             'username' => 'eskapp',
             'password' => 'secret',
-            'payment_method' => AffiliatePaymentMethod::Invoice->value,
+            'payment_method' => AffiliatePaymentMethod::Automatic->value,
         ])
         ->call('create')
         ->assertNotified('Affiliate Acme created');

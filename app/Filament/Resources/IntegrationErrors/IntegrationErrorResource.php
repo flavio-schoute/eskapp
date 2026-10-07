@@ -31,6 +31,8 @@ class IntegrationErrorResource extends Resource
 
     protected static ?string $navigationLabel = 'Integration errors';
 
+    protected static ?int $navigationSort = 2;
+
     public static function canCreate(): bool
     {
         return false;

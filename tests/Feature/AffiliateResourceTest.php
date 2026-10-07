@@ -3,6 +3,7 @@
 use App\Enums\AffiliatePaymentMethod;
 use App\Enums\AffiliateStatus;
 use App\Enums\AffiliateType;
+use App\Enums\InvoiceLanguage;
 use App\Filament\Resources\Affiliates\Pages\CreateAffiliate;
 use App\Filament\Resources\Affiliates\Pages\EditAffiliate;
 use App\Filament\Resources\Affiliates\Pages\ListAffiliates;
@@ -229,16 +230,128 @@ it('saves optional invoice details and shows the formatted address', function ()
 
 it('validates the invoice email address', function () {
     Livewire::test(CreateAffiliate::class)
-        ->fillForm(['invoice_email' => 'not-an-email'])
+        ->fillForm([
+            'payment_method' => AffiliatePaymentMethod::Invoice->value,
+            'invoice_email' => 'not-an-email',
+        ])
         ->call('create')
         ->assertHasFormErrors(['invoice_email' => 'email']);
 });
 
 it('groups affiliates and slack members under one affiliates menu', function () {
-    // Filament only lets users without a panel access check in on the local environment.
-    config(['app.env' => 'local']);
-
     get('/admin/affiliates')
         ->assertOk()
         ->assertSeeInOrder(['e-Skool Tools', 'Affiliates', 'All affiliates', 'Slack members']);
+});
+
+it('lists affiliates paid by invoice first by default, then by name', function () {
+    $automatic = Affiliate::factory()->create(['name' => 'Alpha', 'payment_method' => AffiliatePaymentMethod::Automatic]);
+    $other = Affiliate::factory()->create(['name' => 'Bravo', 'payment_method' => AffiliatePaymentMethod::Other]);
+    $invoiceZulu = Affiliate::factory()->create(['name' => 'Zulu', 'payment_method' => AffiliatePaymentMethod::Invoice]);
+    $invoiceCharlie = Affiliate::factory()->create(['name' => 'Charlie', 'payment_method' => AffiliatePaymentMethod::Invoice]);
+
+    Livewire::test(ListAffiliates::class)
+        ->assertCanSeeTableRecords([$invoiceCharlie, $invoiceZulu, $other, $automatic], inOrder: true)
+        ->sortTable('payment_method', 'desc')
+        ->assertCanSeeTableRecords([$automatic, $other, $invoiceCharlie, $invoiceZulu], inOrder: true);
+});
+
+it('requires the main invoice details when the affiliate is paid by invoice', function () {
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm(['payment_method' => AffiliatePaymentMethod::Invoice->value])
+        ->call('create')
+        ->assertHasFormErrors([
+            'invoice_company_name' => 'required',
+            'invoice_email' => 'required',
+            'invoice_address_line_1' => 'required',
+            'invoice_postal_code' => 'required',
+            'invoice_city' => 'required',
+            'invoice_country' => 'required',
+        ])
+        ->assertHasNoFormErrors([
+            'invoice_contact_person',
+            'invoice_phone',
+            'invoice_address_line_2',
+            'invoice_vat_number',
+        ]);
+});
+
+it('does not require invoice details for automatic payouts', function () {
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm(['payment_method' => AffiliatePaymentMethod::Automatic->value])
+        ->call('create')
+        ->assertHasNoFormErrors(['invoice_company_name', 'invoice_email', 'invoice_country']);
+});
+
+it('asks for the registration and vat number for every country', function () {
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm(['payment_method' => AffiliatePaymentMethod::Invoice->value, 'invoice_country' => 'NL'])
+        ->assertFormFieldVisible('invoice_kvk_number')
+        ->assertFormFieldVisible('invoice_vat_number')
+        ->fillForm(['invoice_country' => 'CN'])
+        ->assertFormFieldVisible('invoice_kvk_number')
+        ->assertFormFieldVisible('invoice_vat_number');
+});
+
+it('accepts a foreign company registration number that is not a kvk number', function () {
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm([
+            'payment_method' => AffiliatePaymentMethod::Invoice->value,
+            'invoice_country' => 'CN',
+            'invoice_kvk_number' => '91330211MA2H1234X',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors(['invoice_kvk_number']);
+});
+
+it('suggests the preferred language from the country', function (string $country, InvoiceLanguage $language) {
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm(['payment_method' => AffiliatePaymentMethod::Invoice->value])
+        ->set('data.invoice_country', $country)
+        ->assertSchemaStateSet(['invoice_language' => $language]);
+})->with([
+    'Netherlands' => ['NL', InvoiceLanguage::Dutch],
+    'Germany' => ['DE', InvoiceLanguage::German],
+    'France' => ['FR', InvoiceLanguage::French],
+    'China' => ['CN', InvoiceLanguage::English],
+    'Spain (no Spanish invoices)' => ['ES', InvoiceLanguage::English],
+]);
+
+it('validates and normalises the kvk and vat numbers', function () {
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm([
+            'payment_method' => AffiliatePaymentMethod::Invoice->value,
+            'invoice_country' => 'NL',
+            'invoice_kvk_number' => '1234',
+            'invoice_vat_number' => '123456789',
+        ])
+        ->call('create')
+        ->assertHasFormErrors(['invoice_kvk_number' => 'regex', 'invoice_vat_number' => 'regex']);
+
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm([
+            'name' => 'Acme',
+            'type' => AffiliateType::Affiliate->value,
+            'status' => AffiliateStatus::Active->value,
+            'login_url' => 'https://acme.test',
+            'username' => 'eskapp',
+            'password' => 'secret',
+            'payment_method' => AffiliatePaymentMethod::Invoice->value,
+            'invoice_company_name' => 'Acme B.V.',
+            'invoice_kvk_number' => '1234 5678',
+            'invoice_vat_number' => 'nl 1234.56789 b01',
+            'invoice_email' => 'billing@acme.test',
+            'invoice_address_line_1' => 'Keizersgracht 1',
+            'invoice_postal_code' => '1015 CJ',
+            'invoice_city' => 'Amsterdam',
+            'invoice_country' => 'NL',
+            'invoice_language' => InvoiceLanguage::Dutch->value,
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(Affiliate::sole())
+        ->invoice_kvk_number->toBe('12345678')
+        ->invoice_vat_number->toBe('NL123456789B01')
+        ->invoice_language->toBe(InvoiceLanguage::Dutch);
 });

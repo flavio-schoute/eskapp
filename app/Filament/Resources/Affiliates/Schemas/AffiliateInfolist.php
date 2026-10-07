@@ -72,6 +72,7 @@ class AffiliateInfolist
                             ->placeholder('No folder yet'),
                     ]),
                 Section::make('Invoice details')
+                    ->visible(fn (Affiliate $record): bool => (bool) $record->payment_method?->requiresInvoiceDetails())
                     ->columns(2)
                     ->columnSpanFull()
                     ->schema([
@@ -85,6 +86,22 @@ class AffiliateInfolist
                         TextEntry::make('invoice_contact_person')
                             ->label('Contact person')
                             ->placeholder('-'),
+                        TextEntry::make('invoice_kvk_number')
+                            ->label(fn (Affiliate $record): string => $record->invoice_country === 'NL' ? 'KvK number' : 'Company registration number')
+                            ->copyable()
+                            ->placeholder('-'),
+                        TextEntry::make('invoice_vat_number')
+                            ->label('VAT number')
+                            ->copyable()
+                            ->placeholder('-'),
+                        TextEntry::make('invoice_language')
+                            ->label('Preferred language')
+                            ->placeholder('-'),
+                        TextEntry::make('mollie_customer_id')
+                            ->label('Mollie customer')
+                            ->fontFamily('mono')
+                            ->copyable()
+                            ->placeholder('Not created yet'),
                         TextEntry::make('invoice_phone')
                             ->label('Phone number')
                             ->url(fn (?string $state): ?string => $state ? 'tel:'.preg_replace('/[^\d+]/', '', $state) : null)

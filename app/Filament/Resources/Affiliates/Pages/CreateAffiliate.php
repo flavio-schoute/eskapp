@@ -36,11 +36,12 @@ class CreateAffiliate extends CreateRecord
         $ready = array_filter([
             $affiliate->slack_channel_name ? "Slack channel #{$affiliate->slack_channel_name}" : null,
             $affiliate->google_drive_folder_id ? 'Google Drive folder' : null,
+            $affiliate->mollie_customer_id ? 'Mollie customer' : null,
         ]);
 
         return Notification::make()
             ->success()
             ->title("Affiliate {$affiliate->name} created")
-            ->body($ready ? implode(' and ', $ready).' are ready.' : null);
+            ->body($ready ? collect($ready)->join(', ', ' and ').' '.(count($ready) === 1 ? 'is' : 'are').' ready.' : null);
     }
 }

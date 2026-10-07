@@ -91,7 +91,7 @@ it('logs a failure from the form and tells the user where to find it', function 
             'login_url' => 'https://acme.test',
             'username' => 'eskapp',
             'password' => 'secret',
-            'payment_method' => AffiliatePaymentMethod::Invoice->value,
+            'payment_method' => AffiliatePaymentMethod::Automatic->value,
         ])
         ->call('create')
         ->assertHasNoFormErrors()

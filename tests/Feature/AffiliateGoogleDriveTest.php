@@ -68,7 +68,7 @@ function validAffiliateFormData(array $overrides = []): array
         'login_url' => 'https://dashboard.acme.test',
         'username' => 'eskapp',
         'password' => 'secret-password',
-        'payment_method' => AffiliatePaymentMethod::Invoice->value,
+        'payment_method' => AffiliatePaymentMethod::Automatic->value,
         ...$overrides,
     ];
 }
