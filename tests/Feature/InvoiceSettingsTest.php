@@ -10,6 +10,7 @@ use App\Filament\Resources\Affiliates\Pages\EditAffiliate;
 use App\Filament\Resources\Affiliates\Pages\ViewAffiliate;
 use App\Models\Affiliate;
 use App\Models\AffiliateInvoice;
+use App\Models\AppSetting;
 use App\Models\IntegrationError;
 use App\Models\User;
 use App\Services\MollieInvoicingCustomersExport;
@@ -32,6 +33,10 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->travelTo('2026-10-07 12:00');
+    config([
+        'services.mollie.create_invoices_via_api' => true,
+        'services.mollie.organization_id' => 'org_19111288',
+    ]);
 
     Http::preventStrayRequests();
     config([
@@ -491,3 +496,67 @@ it('adds the new month to the invoice periods when it starts', function () {
         ->assertFormFieldExists('period', fn (Select $field): bool => array_key_first($field->getOptions()) === '2026-11-01'
             && array_key_last($field->getOptions()) === '2026-05-01');
 });
+
+it('opens mollie invoicing to create the invoice there while the api is switched off', function () {
+    config(['services.mollie.create_invoices_via_api' => false]);
+    $inMollie = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create(['invoice_company_name' => 'Acme B.V.']);
+    $notInMollie = Affiliate::factory()->withInvoiceDetails()->create();
+
+    Livewire::test(InvoiceSettings::class)
+        ->assertActionHasUrl(TestAction::make('generateInvoice')->table(), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices')
+        ->assertActionShouldOpenUrlInNewTab(TestAction::make('generateInvoice')->table())
+        ->assertActionHasUrl(TestAction::make('generateInvoiceForAffiliate')->table($inMollie), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices')
+        ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($inMollie))
+        ->assertActionExists(
+            TestAction::make('generateInvoiceForAffiliate')->table($inMollie),
+            fn (Action $action): bool => $action->getTooltip() === 'Opens Mollie Invoicing → Facturen. Click "Aanmaken" and pick Acme B.V..',
+        )
+        ->assertActionDisabled(TestAction::make('generateInvoiceForAffiliate')->table($notInMollie));
+});
+
+it('opens the generate invoice form when invoices are created through the api', function () {
+    Livewire::test(InvoiceSettings::class)
+        ->assertActionDoesNotHaveUrl(TestAction::make('generateInvoice')->table(), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices');
+});
+
+it('lets flavio switch creating invoices via the mollie api on and off', function () {
+    config(['services.mollie.create_invoices_via_api' => false]);
+    actingAs(User::factory()->create(['email' => 'flavio@e-skool.nl']));
+
+    Livewire::test(InvoiceSettings::class)
+        ->assertFormFieldEnabled('settings.create_invoices_via_api')
+        ->assertActionHasUrl(TestAction::make('generateInvoice')->table(), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices')
+        ->set('settings.create_invoices_via_api', true)
+        ->assertNotified('Invoices are now created via the Mollie API')
+        ->assertActionDoesNotHaveUrl(TestAction::make('generateInvoice')->table(), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices');
+
+    expect(AppSetting::value(AppSetting::CreateInvoicesViaMollieApi))->toBeTrue();
+
+    Livewire::test(InvoiceSettings::class)
+        ->assertSet('settings.create_invoices_via_api', true)
+        ->set('settings.create_invoices_via_api', false)
+        ->assertNotified('Invoices are now created in the Mollie dashboard');
+
+    expect(AppSetting::value(AppSetting::CreateInvoicesViaMollieApi))->toBeFalse();
+});
+
+it('does not let anyone else change the mollie api setting', function () {
+    config(['services.mollie.create_invoices_via_api' => false]);
+    actingAs(User::factory()->create(['email' => 'gairo@e-skool.nl']));
+
+    Livewire::test(InvoiceSettings::class)
+        ->assertFormFieldDisabled('settings.create_invoices_via_api')
+        ->assertSee('Only flavio@e-skool.nl can change this.')
+        ->assertSee('Coming soon')
+        ->set('settings.create_invoices_via_api', true)
+        ->assertSet('settings.create_invoices_via_api', false);
+
+    expect(AppSetting::value(AppSetting::CreateInvoicesViaMollieApi))->toBeNull();
+});
+
+it('uses the env setting until the toggle has been saved', function (bool $envValue) {
+    config(['services.mollie.create_invoices_via_api' => $envValue]);
+
+    Livewire::test(InvoiceSettings::class)
+        ->assertSet('settings.create_invoices_via_api', $envValue);
+})->with([true, false]);

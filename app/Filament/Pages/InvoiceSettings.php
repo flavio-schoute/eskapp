@@ -8,6 +8,8 @@ use App\Enums\Integration;
 use App\Enums\MollieExportStatus;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Models\Affiliate;
+use App\Models\AppSetting;
+use App\Models\User;
 use App\Services\IntegrationErrorLogger;
 use App\Services\MollieInvoicingCustomersExport;
 use App\Services\MollieSalesInvoices;
@@ -17,10 +19,12 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\EmbeddedTable;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
@@ -31,9 +35,11 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\HtmlString;
 use Mollie\Api\Types\PaymentTerm;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
@@ -49,10 +55,32 @@ class InvoiceSettings extends Page implements HasTable
 
     protected static ?string $title = 'Invoice settings';
 
+    /**
+     * @var array{create_invoices_via_api: bool}
+     */
+    public array $settings = ['create_invoices_via_api' => false];
+
+    public function mount(): void
+    {
+        $this->settings['create_invoices_via_api'] = $this->createsInvoicesViaApi();
+    }
+
     public function content(Schema $schema): Schema
     {
         return $schema
             ->components([
+                Section::make('Settings')
+                    ->compact()
+                    ->schema([
+                        Toggle::make('settings.create_invoices_via_api')
+                            ->label(fn (): Htmlable => $this->comingSoonLabel('Create invoices via the Mollie API'))
+                            ->helperText(fn (): string => $this->canManageSettings()
+                                ? 'On: "Generate invoice" creates and emails the invoice from here. Off: it opens Mollie Invoicing → Facturen to create it there.'
+                                : 'Only '.User::InvoiceSettingsManagerEmail.' can change this.')
+                            ->disabled(fn (): bool => ! $this->canManageSettings())
+                            ->live()
+                            ->afterStateUpdated(fn (bool $state) => $this->saveCreateInvoicesViaApi($state)),
+                    ]),
                 Tabs::make('Invoice providers')
                     ->tabs([
                         Tab::make('Mollie')
@@ -118,7 +146,8 @@ class InvoiceSettings extends Page implements HasTable
             ])
             ->headerActions([
                 $this->exportForMollieAction(),
-                $this->generateInvoiceAction(),
+                $this->generateInvoiceAction()
+                    ->tooltip(fn (): ?string => $this->createsInvoicesViaApi() ? null : 'Opens Mollie Invoicing → Facturen. Click "Aanmaken" there, pick the customer and the "Affiliate commissie" product, and enter the price.'),
             ])
             ->recordActions([
                 Action::make('markUpdatedInMollie')
@@ -141,7 +170,8 @@ class InvoiceSettings extends Page implements HasTable
                     ->link()
                     ->disabled(fn (Affiliate $record): bool => $this->whyNotInvoiceable($record) !== null)
                     ->color(fn (Affiliate $record): string => $this->whyNotInvoiceable($record) === null ? 'primary' : 'gray')
-                    ->tooltip(fn (Affiliate $record): ?string => $this->whyNotInvoiceable($record))
+                    ->tooltip(fn (Affiliate $record): ?string => $this->whyNotInvoiceable($record)
+                        ?? ($this->createsInvoicesViaApi() ? null : "Opens Mollie Invoicing → Facturen. Click \"Aanmaken\" and pick {$record->invoice_company_name}."))
                     ->fillForm(fn (Affiliate $record): array => $this->defaultInvoiceData($record)),
             ])
             ->emptyStateIcon(Heroicon::OutlinedDocumentText)
@@ -285,6 +315,7 @@ class InvoiceSettings extends Page implements HasTable
         return Action::make($name)
             ->label('Generate invoice')
             ->icon(Heroicon::OutlinedDocumentPlus)
+            ->url(fn (): ?string => $this->createsInvoicesViaApi() ? null : $this->mollieInvoicesUrl(), shouldOpenInNewTab: true)
             ->modalHeading('Generate invoice')
             ->modalDescription('Mollie creates the invoice in Invoicing → Facturen and emails it, with a payment link, to the partner\'s invoice email address.')
             ->modalSubmitActionLabel('Create and send invoice')
@@ -375,6 +406,75 @@ class InvoiceSettings extends Page implements HasTable
                     ->body("{$affiliate->name} · {$invoice->description} · € ".number_format((float) ($invoice->total_amount ?? $invoice->amount), 2, ',', '.').' incl. VAT')
                     ->send();
             });
+    }
+
+    /**
+     * Whether "Generate invoice" creates the invoice through the Mollie API (otherwise it opens the Mollie dashboard).
+     */
+    protected function createsInvoicesViaApi(): bool
+    {
+        return (bool) AppSetting::value(AppSetting::CreateInvoicesViaMollieApi, config('services.mollie.create_invoices_via_api'));
+    }
+
+    /**
+     * A label with a lock icon and a "Coming soon" badge, for features that are not available yet.
+     */
+    protected function comingSoonLabel(string $label): Htmlable
+    {
+        $lock = svg('heroicon-m-lock-closed', '', ['style' => 'width: 1rem; height: 1rem; color: rgb(156 163 175); flex-shrink: 0;'])->toHtml();
+        $sparkles = svg('heroicon-m-sparkles', '', ['style' => 'width: 0.75rem; height: 0.75rem;'])->toHtml();
+
+        return new HtmlString(
+            '<span style="display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">'
+                .$lock
+                .'<span>'.e($label).'</span>'
+                .'<span style="display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.125rem 0.625rem; border-radius: 9999px;'
+                .' font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #fff;'
+                .' background: linear-gradient(135deg, #f59e0b 0%, #f97316 55%, #ec4899 100%);'
+                .' box-shadow: 0 1px 2px rgb(0 0 0 / 0.15), 0 0 0 1px rgb(255 255 255 / 0.15) inset;">'
+                .$sparkles.'Coming soon'
+                .'</span>'
+            .'</span>'
+        );
+    }
+
+    protected function canManageSettings(): bool
+    {
+        return (bool) auth()->user()?->canManageInvoiceSettings();
+    }
+
+    protected function saveCreateInvoicesViaApi(bool $enabled): void
+    {
+        if (! $this->canManageSettings()) {
+            $this->settings['create_invoices_via_api'] = $this->createsInvoicesViaApi();
+
+            Notification::make()
+                ->danger()
+                ->title('Only '.User::InvoiceSettingsManagerEmail.' can change this setting')
+                ->send();
+
+            return;
+        }
+
+        AppSetting::put(AppSetting::CreateInvoicesViaMollieApi, $enabled, auth()->user());
+
+        Notification::make()
+            ->success()
+            ->title($enabled ? 'Invoices are now created via the Mollie API' : 'Invoices are now created in the Mollie dashboard')
+            ->body($enabled ? '"Generate invoice" opens the form and sends the invoice from here.' : '"Generate invoice" opens Mollie Invoicing → Facturen.')
+            ->send();
+    }
+
+    /**
+     * Mollie Invoicing → Facturen in the dashboard, where "Aanmaken" creates a new invoice.
+     */
+    protected function mollieInvoicesUrl(): string
+    {
+        $organizationId = config('services.mollie.organization_id');
+
+        return $organizationId
+            ? "https://my.mollie.com/dashboard/{$organizationId}/invoice-ar/invoices"
+            : 'https://my.mollie.com/dashboard';
     }
 
     /**

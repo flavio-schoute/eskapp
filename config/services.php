@@ -39,6 +39,14 @@ return [
         // Creates Mollie customers (Customers API) for invoiced affiliates. Off: those customers land in
         // Sales → Klanten, not in Invoicing → Klanten.
         'sync_customers' => (bool) env('MOLLIE_SYNC_CUSTOMERS', false),
+        'key' => env('MOLLIE_KEY'),
+
+        // On: "Generate invoice" creates and sends the invoice through the Sales Invoices API.
+        // Off: it opens Mollie Invoicing → Facturen to create the invoice there.
+        'create_invoices_via_api' => (bool) env('MOLLIE_CREATE_INVOICES_VIA_API', false),
+
+        // Used to link to the Mollie dashboard, e.g. org_19111288.
+        'organization_id' => env('MOLLIE_ORGANIZATION_ID'),
     ],
 
     'slack' => [

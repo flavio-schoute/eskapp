@@ -14,6 +14,7 @@ use Mollie\Api\Http\Data\InvoiceLine;
 use Mollie\Api\Http\Data\Money;
 use Mollie\Api\Http\Data\Recipient;
 use Mollie\Api\Http\Requests\CreateSalesInvoiceRequest;
+use Mollie\Api\MollieApiClient;
 use Mollie\Api\Types\RecipientType;
 use Mollie\Api\Types\SalesInvoiceStatus;
 use Mollie\Api\Types\VatMode;
@@ -40,7 +41,7 @@ class MollieSalesInvoices
         $vatRate = InvoiceVat::rateFor($affiliate);
         $unitPrice = number_format((float) $amount, 2, '.', '');
 
-        $invoice = Mollie::send(new CreateSalesInvoiceRequest(
+        $salesInvoiceRequest = new CreateSalesInvoiceRequest(
             currency: 'EUR',
             status: SalesInvoiceStatus::ISSUED,
             vatScheme: VatScheme::STANDARD,
@@ -51,7 +52,19 @@ class MollieSalesInvoices
             lines: new DataCollection([new InvoiceLine($description, 1, $vatRate, new Money('EUR', $unitPrice))]),
             memo: InvoiceVat::invoiceNote($affiliate),
             emailDetails: $this->emailDetails($affiliate, $period),
-        ));
+        );
+
+        // Todo: complete implementation of Mollie API client usage, including sending the invoice and handling the response.
+        $mollie = new MollieApiClient;
+        $mollie->setApiKey(config('services.mollie.key'));
+
+        dd($mollie->send($salesInvoiceRequest));
+
+        // dd(Mollie::send($salesInvoiceRequest));
+
+        // dd($salesInvoiceRequest);
+
+        Mollie::send($salesInvoiceRequest);
 
         return AffiliateInvoice::create([
             'affiliate_id' => $affiliate->getKey(),
