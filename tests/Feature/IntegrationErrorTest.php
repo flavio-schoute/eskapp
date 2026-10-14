@@ -83,7 +83,10 @@ it('logs a failure from saving outside the form', function () {
         ->message->toBe('Slack conversations.create failed: missing_scope');
 });
 
-it('logs a failure from the form and tells the user where to find it', function () {
+it('logs a failure from the background sync after saving the form', function () {
+    config(['services.slack.notifications.bot_user_oauth_token' => 'xoxb-test-token']);
+    Http::fake(['slack.com/api/*' => Http::response(['ok' => false, 'error' => 'missing_scope'])]);
+
     Livewire::test(CreateAffiliate::class)
         ->fillForm([
             'name' => 'Acme',
@@ -96,13 +99,12 @@ it('logs a failure from the form and tells the user where to find it', function 
         ])
         ->call('create')
         ->assertHasNoFormErrors()
-        ->assertNotified('Saved, but Google Drive sync failed');
+        ->assertNotified('Affiliate Acme created');
 
-    expect(IntegrationError::where('integration', Integration::GoogleDrive)->sole())
-        ->action->toBe('Create folder')
-        ->message->toBe('Google Drive is not configured.');
+    expect(IntegrationError::where('integration', Integration::Slack)->sole())
+        ->action->toBe('Create channel')
+        ->message->toBe('Slack conversations.create failed: missing_scope');
 });
-
 it('shows unresolved errors by default', function () {
     $unresolved = IntegrationError::factory()->create();
     $resolved = IntegrationError::factory()->resolved()->create();

@@ -2,12 +2,10 @@
 
 namespace App\Filament\Resources\SlackMembers\Widgets;
 
-use App\Enums\Integration;
 use App\Enums\InvoiceLanguage;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Filament\Resources\SlackMembers\SlackMemberResource;
 use App\Models\Affiliate;
-use App\Models\IntegrationError;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -67,7 +65,7 @@ class AffiliateSlackChannels extends TableWidget
                     ->icon(Heroicon::OutlinedUserPlus)
                     ->link()
                     ->modalHeading(fn (Affiliate $record): string => "Slack contact for #{$record->slack_channel_name}")
-                    ->modalDescription('The contact is invited to this channel when you save a new member ID.')
+                    ->modalDescription('The contact is invited to this channel in the background when you save a new member ID. Problems show up under System → Integration errors.')
                     ->fillForm(fn (Affiliate $record): array => [
                         'slack_contact_name' => $record->slack_contact_name,
                         'slack_contact_member_id' => $record->slack_contact_member_id,
@@ -85,32 +83,12 @@ class AffiliateSlackChannels extends TableWidget
                             ->helperText('Language of the Slack messages to this contact.'),
                     ])
                     ->action(function (Affiliate $record, array $data): void {
-                        $lastErrorId = IntegrationError::max('id') ?? 0;
-
                         $record->update($data);
-
-                        $inviteFailed = IntegrationError::query()
-                            ->where('id', '>', $lastErrorId)
-                            ->where('affiliate_id', $record->getKey())
-                            ->where('integration', Integration::Slack)
-                            ->where('action', 'Invite contact')
-                            ->first();
-
-                        if ($inviteFailed) {
-                            Notification::make()
-                                ->warning()
-                                ->title("Saved, but the contact could not be invited to #{$record->slack_channel_name}")
-                                ->body($inviteFailed->summary().' The error is logged under System → Integration errors.')
-                                ->persistent()
-                                ->send();
-
-                            return;
-                        }
 
                         Notification::make()
                             ->success()
                             ->title(filled($record->slack_contact_member_id) && $record->wasChanged('slack_contact_member_id')
-                                ? "Contact saved and invited to #{$record->slack_channel_name}"
+                                ? "Contact saved; they are invited to #{$record->slack_channel_name} in the background"
                                 : "Contact for #{$record->slack_channel_name} saved")
                             ->send();
                     }),

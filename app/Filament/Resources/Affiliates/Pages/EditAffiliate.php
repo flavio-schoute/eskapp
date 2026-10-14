@@ -35,10 +35,9 @@ class EditAffiliate extends EditRecord
 
     protected function afterSave(): void
     {
-        $this->syncIntegrations();
+        $this->queueAgreementUpload();
 
         $this->data['agreement_upload'] = null;
-        $this->refreshFormData(['agreement_file_name', 'agreement_drive_url', 'google_drive_folder_id', 'slack_channel_name']);
     }
 
     protected function getSavedNotificationTitle(): ?string

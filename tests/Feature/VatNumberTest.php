@@ -165,3 +165,27 @@ it('does not overwrite invoice fields that are already filled in', function () {
             'invoice_address_line_1' => 'Kwikstaartlaan 42',
         ]);
 });
+
+it('checks the vat number with vies and fills in the address when you leave the field', function () {
+    fakeVies('VALID', true, 'ESKOOL B.V.', "KWIKSTAARTLAAN 00042\n3704GS ZEIST");
+
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm(['payment_method' => AffiliatePaymentMethod::Invoice->value])
+        ->set('data.invoice_vat_number', 'NL 8665.80748.B01')
+        ->assertNotified('NL866580748B01 is valid')
+        ->assertSchemaStateSet([
+            'invoice_company_name' => 'Eskool B.V.',
+            'invoice_address_line_1' => 'Kwikstaartlaan 42',
+            'invoice_postal_code' => '3704 GS',
+            'invoice_city' => 'Zeist',
+        ]);
+});
+
+it('warns right away when vies says the vat number is not valid', function () {
+    fakeVies('INVALID', false);
+
+    Livewire::test(CreateAffiliate::class)
+        ->fillForm(['payment_method' => AffiliatePaymentMethod::Invoice->value])
+        ->set('data.invoice_vat_number', 'BE0000000000')
+        ->assertNotified('BE0000000000 is not valid according to VIES');
+});

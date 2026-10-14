@@ -133,7 +133,7 @@ it('renames the channel when the partner name or type changes', function () {
     Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://slack.com/api/conversations.create');
 });
 
-it('still saves the affiliate and warns when slack returns an error', function () {
+it('saves the affiliate and logs it when slack returns an error', function () {
     Http::fake(['slack.com/api/*' => Http::response(['ok' => false, 'error' => 'missing_scope'])]);
 
     Livewire::test(CreateAffiliate::class)
@@ -148,11 +148,11 @@ it('still saves the affiliate and warns when slack returns an error', function (
         ])
         ->call('create')
         ->assertHasNoFormErrors()
-        ->assertNotified('Saved, but Slack sync failed');
+        ->assertNotified('Affiliate Test KFB created');
 
-    expect(Affiliate::sole()->slack_channel_id)->toBeNull();
+    expect(Affiliate::sole()->slack_channel_id)->toBeNull()
+        ->and(IntegrationError::where('action', 'Create channel')->sole()->message)->toBe('Slack conversations.create failed: missing_scope');
 });
-
 it('does not call slack when no bot token is configured', function () {
     config(['services.slack.notifications.bot_user_oauth_token' => null]);
 
@@ -223,7 +223,7 @@ it('lists the affiliate channels and lets you add the partner\'s contact', funct
             'slack_contact_member_id' => ' u0partner01 ',
         ])
         ->assertHasNoActionErrors()
-        ->assertNotified('Contact saved and invited to #acme-affiliate');
+        ->assertNotified('Contact saved; they are invited to #acme-affiliate in the background');
 
     expect($affiliate->refresh())
         ->slack_contact_name->toBe('Kim')

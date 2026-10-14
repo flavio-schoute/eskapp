@@ -219,20 +219,19 @@ it('creates the drive folder even when no agreement is uploaded', function () {
     Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/upload/'));
 });
 
-it('still saves the affiliate and warns when google drive is not configured', function () {
+it('saves the affiliate and skips google drive when it is not configured', function () {
     config(['services.google_drive.refresh_token' => null]);
 
     Livewire::test(CreateAffiliate::class)
         ->fillForm(validAffiliateFormData())
         ->call('create')
         ->assertHasNoFormErrors()
-        ->assertNotified('Saved, but Google Drive sync failed');
+        ->assertNotified('Affiliate Acme Partners created');
 
     expect(Affiliate::sole()->google_drive_folder_id)->toBeNull();
 
     Http::assertNothingSent();
 });
-
 it('only accepts pdf agreement files', function () {
     fakeGoogleDrive();
 

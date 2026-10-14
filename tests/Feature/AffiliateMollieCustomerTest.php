@@ -191,16 +191,16 @@ it('keeps the customer metadata within the mollie size limit', function () {
         ->not->toHaveKey('contact_person');
 });
 
-it('logs and warns when mollie is not configured', function () {
+it('skips mollie when it is not configured', function () {
     config(['mollie.key' => 'test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx']);
+    fakeMollieCustomers();
 
     Livewire::test(CreateAffiliate::class)
         ->fillForm(chineseInvoiceAffiliateFormData())
         ->call('create')
-        ->assertHasNoFormErrors()
-        ->assertNotified('Saved, but Mollie sync failed');
+        ->assertHasNoFormErrors();
 
-    expect(IntegrationError::where('integration', Integration::Mollie)->sole())
-        ->action->toBe('Create customer')
-        ->message->toBe('Mollie is not configured.');
+    expect(Affiliate::sole()->mollie_customer_id)->toBeNull()
+        ->and(IntegrationError::where('integration', Integration::Mollie)->count())->toBe(0);
+    Mollie::assertSentCount(0);
 });

@@ -139,7 +139,7 @@ class AffiliateForm
                         TextInput::make('invoice_vat_number')
                             ->label(fn (Get $get): string => $get('invoice_country') === 'NL' ? 'VAT number (BTW)' : 'VAT number')
                             ->placeholder(fn (Get $get): string => InvoiceAddressFormat::vatNumberPlaceholder($get('invoice_country')))
-                            ->helperText('Dots, spaces and dashes are fine (e.g. BE 0123.456.789); it is saved as BE0123456789. EU numbers are checked with VIES.')
+                            ->helperText('Dots, spaces and dashes are fine (e.g. BE 0123.456.789); it is saved as BE0123456789. EU numbers are checked with VIES as soon as you leave the field, and empty address fields are filled in.')
                             ->regex('/^\s*[A-Za-z]{2}[A-Za-z0-9 .+*\-]{2,20}\s*$/')
                             ->validationMessages(['regex' => 'A VAT number starts with the 2-letter country code, e.g. NL123456789B01.'])
                             ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
@@ -198,6 +198,32 @@ class AffiliateForm
                                         };
                                     })
                             )
+                            ->live(onBlur: true)
+                            ->afterStateUpdated(function (?string $state, Get $get, Set $set): void {
+                                $vies = app(ViesVatValidator::class);
+
+                                if (blank($state) || ! $vies->isEnabled() || ! ViesVatValidator::isEuVatNumber($state)) {
+                                    return;
+                                }
+
+                                $vatNumber = ViesVatValidator::normalize($state);
+                                $result = $vies->check($vatNumber);
+
+                                if ($result['status'] === ViesVatValidator::Valid) {
+                                    $filled = static::fillFromVies($vatNumber, $result, $get, $set);
+
+                                    Notification::make()
+                                        ->success()
+                                        ->title("{$vatNumber} is valid")
+                                        ->body($filled ? 'Filled in from VIES: '.implode(', ', $filled).'.' : null)
+                                        ->send();
+                                } elseif ($result['status'] === ViesVatValidator::Invalid) {
+                                    Notification::make()
+                                        ->danger()
+                                        ->title("{$vatNumber} is not valid according to VIES")
+                                        ->send();
+                                }
+                            })
                             ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? ViesVatValidator::normalize($state) : null),
                         TextInput::make('invoice_email')
                             ->label('Email address')
