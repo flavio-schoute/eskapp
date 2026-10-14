@@ -14,6 +14,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'mollie_sales_invoice_id',
     'invoice_number',
     'status',
+    'due_at',
+    'paid_at',
+    'status_checked_at',
     'period',
     'description',
     'amount',
@@ -21,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'total_amount',
     'sent_to',
     'pdf_url',
+    'slack_posted_at',
 ])]
 class AffiliateInvoice extends Model
 {
@@ -39,6 +43,10 @@ class AffiliateInvoice extends Model
             'amount' => 'decimal:2',
             'vat_rate' => 'decimal:2',
             'total_amount' => 'decimal:2',
+            'slack_posted_at' => 'datetime',
+            'due_at' => 'datetime',
+            'paid_at' => 'datetime',
+            'status_checked_at' => 'datetime',
         ];
     }
 
@@ -56,5 +64,22 @@ class AffiliateInvoice extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function isPaid(): bool
+    {
+        return $this->status === 'paid';
+    }
+
+    /**
+     * Days until the due date: negative when overdue, null when paid or without a due date.
+     */
+    public function daysUntilDue(): ?int
+    {
+        if ($this->isPaid() || ! $this->due_at) {
+            return null;
+        }
+
+        return (int) now()->startOfDay()->diffInDays($this->due_at->copy()->startOfDay(), false);
     }
 }

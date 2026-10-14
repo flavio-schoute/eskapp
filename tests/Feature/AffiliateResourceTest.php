@@ -242,7 +242,7 @@ it('validates the invoice email address', function () {
 it('groups the affiliate pages under affiliates and the settings under system', function () {
     get('/admin/affiliates')
         ->assertOk()
-        ->assertSeeInOrder(['e-Skool Tools', 'Affiliates', 'All affiliates', 'Invoices', 'System', 'Email templates', 'Slack settings', 'Integration errors']);
+        ->assertSeeInOrder(['e-Skool Tools', 'Affiliates', 'All affiliates', 'Invoices', 'System', 'Templates', 'Slack settings', 'Integration errors']);
 });
 it('lists affiliates paid by invoice first by default, then by name', function () {
     $automatic = Affiliate::factory()->create(['name' => 'Alpha', 'payment_method' => AffiliatePaymentMethod::Automatic]);

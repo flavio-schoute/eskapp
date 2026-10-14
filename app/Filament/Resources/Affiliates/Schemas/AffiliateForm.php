@@ -53,11 +53,15 @@ class AffiliateForm
                         TextInput::make('slack_contact_name')
                             ->label('Slack contact person')
                             ->placeholder('Name of the partner\'s contact in Slack')
-                            ->maxLength(255)
-                            ->columnSpan(2),
+                            ->maxLength(255),
                         SlackMemberResource::memberIdField('slack_contact_member_id')
                             ->helperText('Invited to the partner\'s Slack channel automatically. In Slack: profile → ⋮ (more) → Copy member ID.')
                             ->columnSpan(2),
+                        Select::make('slack_contact_language')
+                            ->label('Slack language')
+                            ->options(InvoiceLanguage::class)
+                            ->placeholder('Same as invoice language')
+                            ->helperText('Language of the Slack messages to this contact.'),
                     ]),
                 Section::make('Access')
                     ->columns(3)

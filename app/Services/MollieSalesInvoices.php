@@ -14,6 +14,7 @@ use Mollie\Api\Http\Data\InvoiceLine;
 use Mollie\Api\Http\Data\Money;
 use Mollie\Api\Http\Data\Recipient;
 use Mollie\Api\Http\Requests\CreateSalesInvoiceRequest;
+use Mollie\Api\Http\Requests\GetSalesInvoiceRequest;
 use Mollie\Api\Types\RecipientType;
 use Mollie\Api\Types\SalesInvoiceStatus;
 use Mollie\Api\Types\VatMode;
@@ -61,6 +62,8 @@ class MollieSalesInvoices
             'mollie_sales_invoice_id' => $invoice->id,
             'invoice_number' => $invoice->invoiceNumber,
             'status' => $invoice->status,
+            'due_at' => $invoice->dueAt ? Carbon::parse($invoice->dueAt) : now()->addDays((int) $paymentTerm),
+            'status_checked_at' => now(),
             'period' => $period->toDateString(),
             'description' => $description,
             'amount' => $unitPrice,
@@ -69,6 +72,24 @@ class MollieSalesInvoices
             'sent_to' => $affiliate->invoice_email,
             'pdf_url' => $invoice->_links->pdfLink->href ?? null,
         ]);
+    }
+
+    /**
+     * Fetch the invoice's current status from Mollie, and remember when it was first seen as paid.
+     */
+    public function refreshStatus(AffiliateInvoice $invoice): AffiliateInvoice
+    {
+        $salesInvoice = Mollie::send(new GetSalesInvoiceRequest($invoice->mollie_sales_invoice_id));
+
+        $invoice->update([
+            'status' => $salesInvoice->status,
+            'invoice_number' => $salesInvoice->invoiceNumber ?? $invoice->invoice_number,
+            'due_at' => $salesInvoice->dueAt ? Carbon::parse($salesInvoice->dueAt) : $invoice->due_at,
+            'paid_at' => $salesInvoice->status === SalesInvoiceStatus::PAID ? ($invoice->paid_at ?? now()) : null,
+            'status_checked_at' => now(),
+        ]);
+
+        return $invoice;
     }
 
     /**

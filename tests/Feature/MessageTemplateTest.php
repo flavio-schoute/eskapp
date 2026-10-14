@@ -1,11 +1,13 @@
 <?php
 
-use App\Enums\EmailTemplateType;
 use App\Enums\InvoiceLanguage;
+use App\Enums\MessageTemplateType;
 use App\Filament\Pages\AffiliateInvoices;
-use App\Filament\Resources\EmailTemplates\Pages\ManageEmailTemplates;
+use App\Filament\Resources\MessageTemplates\MessageTemplateResource;
+use App\Filament\Resources\MessageTemplates\Pages\ManageMessageTemplates;
+use App\Filament\Resources\MessageTemplates\Widgets\SlackMessageTemplates;
 use App\Models\Affiliate;
-use App\Models\EmailTemplate;
+use App\Models\MessageTemplate;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Forms\Components\Select;
@@ -70,40 +72,56 @@ function sentEmailDetails(): array
 }
 
 it('starts with a dutch and an english default mollie invoice template', function () {
-    expect(EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::Dutch)->subject)->toBe('Factuur affiliate commissie {month}')
-        ->and(EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::English)->subject)->toBe('Invoice affiliate commission {month}');
+    expect(MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::Dutch)->subject)->toBe('Factuur affiliate commissie {month}')
+        ->and(MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::English)->subject)->toBe('Invoice affiliate commission {month}');
 });
 
-it('falls back to the english default when there is no default in the partner\'s language', function () {
-    expect(EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::German)->language)->toBe(InvoiceLanguage::English);
+it('has a default template in every invoice language', function (InvoiceLanguage $language, string $subject) {
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->make();
+
+    $template = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, $language);
+
+    expect($template->language)->toBe($language)
+        ->and($template->renderFor($affiliate, Carbon::parse('2026-09-01'))['subject'])->toBe($subject);
+})->with([
+    'Dutch' => [InvoiceLanguage::Dutch, 'Factuur affiliate commissie september 2026'],
+    'English' => [InvoiceLanguage::English, 'Invoice affiliate commission September 2026'],
+    'German' => [InvoiceLanguage::German, 'Rechnung Affiliate-Provision September 2026'],
+    'French' => [InvoiceLanguage::French, 'Facture commission d’affiliation septembre 2026'],
+]);
+
+it('falls back to the english default when a language has no default template', function () {
+    MessageTemplate::where('language', InvoiceLanguage::German)->delete();
+
+    expect(MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::German)->language)->toBe(InvoiceLanguage::English);
 });
 
 it('is listed under the system menu', function () {
-    get('/admin/email-templates')
+    get('/admin/templates')
         ->assertOk()
-        ->assertSeeInOrder(['System', 'Email templates', 'Integration errors']);
+        ->assertSeeInOrder(['System', 'Templates', 'Integration errors']);
 });
 
 it('can edit a template', function () {
-    $template = EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::Dutch);
+    $template = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::Dutch);
 
-    Livewire::test(ManageEmailTemplates::class)
+    Livewire::test(ManageMessageTemplates::class)
         ->assertCanSeeTableRecords([$template])
         ->callAction(TestAction::make('edit')->table($template), data: [
             'subject' => 'Je factuur voor {month}',
         ])
         ->assertHasNoActionErrors()
-        ->assertNotified('Email template Standaard (Nederlands) saved');
+        ->assertNotified('Template Standaard (Nederlands) saved');
 
     expect($template->refresh()->subject)->toBe('Je factuur voor {month}');
 });
 
 it('keeps only one default template per language', function () {
-    $old = EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::Dutch);
+    $old = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::Dutch);
 
-    Livewire::test(ManageEmailTemplates::class)
+    Livewire::test(ManageMessageTemplates::class)
         ->callAction('create', data: [
-            'type' => EmailTemplateType::MollieInvoice->value,
+            'type' => MessageTemplateType::MollieInvoice->value,
             'language' => InvoiceLanguage::Dutch->value,
             'name' => 'Vriendelijk',
             'is_default' => true,
@@ -113,7 +131,7 @@ it('keeps only one default template per language', function () {
         ->assertHasNoActionErrors();
 
     expect($old->refresh()->is_default)->toBeFalse()
-        ->and(EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::Dutch)->name)->toBe('Vriendelijk');
+        ->and(MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::Dutch)->name)->toBe('Vriendelijk');
 });
 
 it('fills in the placeholders', function () {
@@ -123,7 +141,7 @@ it('fills in the placeholders', function () {
         'invoice_contact_person' => null,
     ]);
 
-    expect(EmailTemplate::fillPlaceholders('{contact_person} · {company_name} · {partner_name} · {month}', $affiliate, Carbon::parse('2026-09-01'), InvoiceLanguage::Dutch))
+    expect(MessageTemplate::fillPlaceholders('{contact_person} · {company_name} · {partner_name} · {month}', $affiliate, Carbon::parse('2026-09-01'), InvoiceLanguage::Dutch))
         ->toBe('Acme B.V. · Acme B.V. · Acme · september 2026');
 });
 
@@ -136,7 +154,7 @@ it('sends the default template in the partner\'s language with the invoice', fun
 
     Livewire::test(AffiliateInvoices::class)
         ->mountAction(TestAction::make('generateInvoiceForAffiliate')->table($affiliate))
-        ->assertSchemaStateSet(['email_template' => (string) EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::English)->getKey()])
+        ->assertSchemaStateSet(['email_template' => (string) MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::English)->getKey()])
         ->fillForm(['amount' => '10', 'period' => '2026-09-01'])
         ->callMountedAction()
         ->assertHasNoActionErrors();
@@ -175,21 +193,25 @@ it('sends a custom email for one invoice', function () {
     ]);
 });
 
-it('groups the templates by language and explains which one was picked', function () {
+it('groups the email templates by language', function () {
     $affiliate = Affiliate::factory()->withInvoiceDetails()->create([
         'name' => 'Acme',
         'invoice_language' => InvoiceLanguage::Dutch,
     ]);
-    $dutch = EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::Dutch);
-    $english = EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::English);
+    $dutch = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::Dutch);
+    $english = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::English);
+    $french = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::French);
+    $german = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::German);
 
     Livewire::test(AffiliateInvoices::class)
         ->mountAction(TestAction::make('generateInvoiceForAffiliate')->table($affiliate))
         ->assertFormFieldExists('email_template', fn (Select $field): bool => $field->getOptions() === [
             'Dutch' => [(string) $dutch->getKey() => 'Standaard (Nederlands)'],
             'English' => [(string) $english->getKey() => 'Default (English)'],
+            'French' => [(string) $french->getKey() => 'Standard (Français)'],
+            'German' => [(string) $german->getKey() => 'Standard (Deutsch)'],
             'Other' => ['custom' => 'Custom – write the email for this invoice'],
-        ] && $field->getHelperText() === "Picked automatically from Acme's preferred language (Dutch). Choose another template or Custom to change the email.");
+        ]);
 });
 
 it('picks the template from the country when no preferred language is set', function () {
@@ -200,5 +222,62 @@ it('picks the template from the country when no preferred language is set', func
 
     Livewire::test(AffiliateInvoices::class)
         ->mountAction(TestAction::make('generateInvoiceForAffiliate')->table($affiliate))
-        ->assertSchemaStateSet(['email_template' => (string) EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, InvoiceLanguage::Dutch)->getKey()]);
+        ->assertSchemaStateSet(['email_template' => (string) MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::Dutch)->getKey()]);
+});
+
+it('lists every placeholder as a chip you can click to copy', function () {
+    $help = MessageTemplateResource::placeholderHelp(MessageTemplateType::MollieInvoice)->toHtml();
+
+    foreach (array_keys(MessageTemplateType::MollieInvoice->placeholders()) as $placeholder) {
+        expect($help)->toContain('>'.$placeholder.'</span>')
+            ->toContain(e(json_encode($placeholder)));
+    }
+
+    expect($help)->toContain('click one to copy it');
+});
+
+it('shows email templates and slack templates in separate tables', function () {
+    $email = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, InvoiceLanguage::Dutch);
+    $slack = MessageTemplate::defaultFor(MessageTemplateType::SlackInvoice, InvoiceLanguage::Dutch);
+
+    Livewire::test(ManageMessageTemplates::class)
+        ->assertCanSeeTableRecords([$email])
+        ->assertCanNotSeeTableRecords([$slack]);
+
+    Livewire::test(SlackMessageTemplates::class)
+        ->assertCanSeeTableRecords([$slack])
+        ->assertCanNotSeeTableRecords([$email]);
+});
+
+it('adds and edits slack templates in the slack table', function () {
+    Livewire::test(SlackMessageTemplates::class)
+        ->callAction(TestAction::make('create')->table(), data: [
+            'language' => InvoiceLanguage::English->value,
+            'name' => 'Short',
+            'body' => 'Hey {mention}, invoice {invoice_number} is in your inbox.',
+        ])
+        ->assertHasNoActionErrors()
+        ->assertNotified('Template Short added');
+
+    $template = MessageTemplate::where('name', 'Short')->sole();
+
+    expect($template->type)->toBe(MessageTemplateType::SlackInvoice)
+        ->and($template->subject)->toBeNull();
+
+    Livewire::test(SlackMessageTemplates::class)
+        ->callAction(TestAction::make('edit')->table($template), data: ['body' => 'Hey {mention}, see {invoice_number}.'])
+        ->assertHasNoActionErrors()
+        ->assertNotified('Template Short saved');
+
+    expect($template->refresh()->body)->toBe('Hey {mention}, see {invoice_number}.');
+});
+
+it('creates email templates as emails with a subject', function () {
+    Livewire::test(ManageMessageTemplates::class)
+        ->callAction('create', data: [
+            'language' => InvoiceLanguage::English->value,
+            'name' => 'Reminder',
+            'body' => 'Hello {contact_person}',
+        ])
+        ->assertHasActionErrors(['subject' => 'required']);
 });

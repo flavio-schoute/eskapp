@@ -32,14 +32,17 @@ class AffiliateInfolist
                             ->placeholder('No channel yet'),
                         TextEntry::make('slack_contact_name')
                             ->label('Slack contact person')
-                            ->placeholder('-')
-                            ->columnSpan(2),
+                            ->placeholder('-'),
                         TextEntry::make('slack_contact_member_id')
                             ->label('Slack member ID')
                             ->fontFamily('mono')
                             ->copyable()
                             ->placeholder('-')
                             ->columnSpan(2),
+                        TextEntry::make('slack_contact_language')
+                            ->label('Slack language')
+                            ->state(fn (Affiliate $record): string => $record->slackContactLanguage()->getLabel())
+                            ->helperText(fn (Affiliate $record): ?string => $record->slack_contact_language ? null : 'Same as invoice language'),
                     ]),
                 Section::make('Access')
                     ->columns(3)

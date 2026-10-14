@@ -3,11 +3,13 @@
 namespace App\Filament\Resources\SlackMembers\Widgets;
 
 use App\Enums\Integration;
+use App\Enums\InvoiceLanguage;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Filament\Resources\SlackMembers\SlackMemberResource;
 use App\Models\Affiliate;
 use App\Models\IntegrationError;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
@@ -52,6 +54,12 @@ class AffiliateSlackChannels extends TableWidget
                     ->fontFamily('mono')
                     ->copyable()
                     ->placeholder('Not added'),
+                TextColumn::make('slack_contact_language')
+                    ->label('Language')
+                    ->state(fn (Affiliate $record): string => $record->slackContactLanguage()->getLabel())
+                    ->badge()
+                    ->color('gray')
+                    ->tooltip(fn (Affiliate $record): ?string => $record->slack_contact_language ? null : 'Same as the invoice language'),
             ])
             ->recordActions([
                 Action::make('editContact')
@@ -63,12 +71,18 @@ class AffiliateSlackChannels extends TableWidget
                     ->fillForm(fn (Affiliate $record): array => [
                         'slack_contact_name' => $record->slack_contact_name,
                         'slack_contact_member_id' => $record->slack_contact_member_id,
+                        'slack_contact_language' => $record->slack_contact_language,
                     ])
                     ->schema([
                         TextInput::make('slack_contact_name')
                             ->label('Contact person')
                             ->maxLength(255),
                         SlackMemberResource::memberIdField('slack_contact_member_id'),
+                        Select::make('slack_contact_language')
+                            ->label('Language')
+                            ->options(InvoiceLanguage::class)
+                            ->placeholder('Same as invoice language')
+                            ->helperText('Language of the Slack messages to this contact.'),
                     ])
                     ->action(function (Affiliate $record, array $data): void {
                         $lastErrorId = IntegrationError::max('id') ?? 0;

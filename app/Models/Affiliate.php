@@ -49,6 +49,7 @@ use Illuminate\Support\Str;
     'slack_channel_name',
     'slack_contact_name',
     'slack_contact_member_id',
+    'slack_contact_language',
     'mollie_customer_id',
 ])]
 #[ObservedBy(AffiliateObserver::class)]
@@ -69,6 +70,7 @@ class Affiliate extends Model
             'status' => AffiliateStatus::class,
             'payment_method' => AffiliatePaymentMethod::class,
             'invoice_language' => InvoiceLanguage::class,
+            'slack_contact_language' => InvoiceLanguage::class,
             'password' => 'encrypted',
         ];
     }
@@ -122,6 +124,22 @@ class Affiliate extends Model
         $partner = Str::of((string) $name)->slug()->limit(80 - strlen($typeSuffix), '')->rtrim('-')->toString();
 
         return $partner.$typeSuffix;
+    }
+
+    /**
+     * The language of the invoice documents and emails: the preferred language, otherwise suggested from the country.
+     */
+    public function invoiceLanguage(): InvoiceLanguage
+    {
+        return $this->invoice_language ?? InvoiceLanguage::suggestedFor($this->invoice_country);
+    }
+
+    /**
+     * The language for Slack messages to the partner's contact, falling back to the invoice language.
+     */
+    public function slackContactLanguage(): InvoiceLanguage
+    {
+        return $this->slack_contact_language ?? $this->invoiceLanguage();
     }
 
     /**

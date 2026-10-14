@@ -4,22 +4,25 @@ namespace App\Filament\Pages;
 
 use App\Enums\AffiliatePaymentMethod;
 use App\Enums\AffiliateStatus;
-use App\Enums\EmailTemplateType;
 use App\Enums\Integration;
 use App\Enums\InvoiceLanguage;
+use App\Enums\MessageTemplateType;
 use App\Filament\Resources\Affiliates\AffiliateResource;
-use App\Filament\Resources\EmailTemplates\EmailTemplateResource;
+use App\Filament\Resources\MessageTemplates\MessageTemplateResource;
 use App\Models\Affiliate;
-use App\Models\EmailTemplate;
+use App\Models\AffiliateInvoice;
+use App\Models\MessageTemplate;
 use App\Services\AffiliateMollieSync;
 use App\Services\IntegrationErrorLogger;
 use App\Services\MollieSalesInvoices;
+use App\Services\SlackInvoiceMessages;
 use App\Support\InvoiceAddressFormat;
 use App\Support\InvoiceVat;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -70,8 +73,8 @@ class AffiliateInvoices extends Page implements HasTable
                     ->tabs([
                         Tab::make('Mollie')
                             ->icon(Heroicon::OutlinedCreditCard)
-                            ->badge(fn (): ?int => $this->invoicedAffiliatesQuery()->whereNull('mollie_customer_id')->count() ?: null)
-                            ->badgeColor('warning')
+                            ->badge(fn (): ?int => $this->overdueInvoicesCount() ?: null)
+                            ->badgeColor('danger')
                             ->schema([
                                 EmbeddedTable::make(),
                             ]),
@@ -104,20 +107,6 @@ class AffiliateInvoices extends Page implements HasTable
                     ->label('Country')
                     ->formatStateUsing(fn (string $state): ?string => InvoiceAddressFormat::countryName($state))
                     ->placeholder('-'),
-                TextColumn::make('mollie_customer_id')
-                    ->label('Mollie customer')
-                    ->formatStateUsing(fn (): string => 'In Mollie')
-                    ->badge()
-                    ->color('success')
-                    ->icon(Heroicon::OutlinedCheckCircle)
-                    ->description(fn (Affiliate $record): ?string => $record->mollie_customer_id)
-                    ->copyable()
-                    ->copyableState(fn (Affiliate $record): ?string => $record->mollie_customer_id)
-                    ->copyMessage('Mollie customer ID copied')
-                    ->placeholder('Not in Mollie yet')
-                    ->tooltip(fn (Affiliate $record): string => filled($record->mollie_customer_id)
-                        ? 'Click to copy the Mollie customer ID.'
-                        : ($this->missingDetailsTooltip($record) ?? 'Click "Add to Mollie" to create the customer now.')),
                 TextColumn::make('invoice_details_status')
                     ->label('Invoice details')
                     ->state(fn (Affiliate $record): string => $record->hasCompleteInvoiceDetails() ? 'Complete' : 'Incomplete')
@@ -130,8 +119,47 @@ class AffiliateInvoices extends Page implements HasTable
                     ->description(fn (Affiliate $record): ?string => $record->latestInvoice ? '€ '.number_format((float) ($record->latestInvoice->total_amount ?? $record->latestInvoice->amount), 2, ',', '.') : null)
                     ->url(fn (Affiliate $record): ?string => $record->latestInvoice?->pdf_url, shouldOpenInNewTab: true)
                     ->placeholder('-'),
+                TextColumn::make('payment_status')
+                    ->label('Payment')
+                    ->state(fn (Affiliate $record): ?string => $record->latestInvoice ? $this->paymentLabel($record->latestInvoice) : null)
+                    ->badge()
+                    ->color(fn (Affiliate $record): string => $this->paymentColor($record->latestInvoice))
+                    ->icon(fn (Affiliate $record): ?Heroicon => match (true) {
+                        $record->latestInvoice?->isPaid() => Heroicon::OutlinedCheckCircle,
+                        ($record->latestInvoice?->daysUntilDue() ?? 1) < 0 => Heroicon::OutlinedExclamationTriangle,
+                        $record->latestInvoice !== null => Heroicon::OutlinedClock,
+                        default => null,
+                    })
+                    ->description(fn (Affiliate $record): ?string => $record->latestInvoice ? $this->paymentDescription($record->latestInvoice) : null)
+                    ->tooltip(fn (Affiliate $record): ?string => $record->latestInvoice?->status_checked_at
+                        ? 'Checked with Mollie '.$record->latestInvoice->status_checked_at->diffForHumans()
+                        : null)
+                    ->placeholder('-'),
             ])
             ->headerActions([
+                Action::make('refreshPaymentStatus')
+                    ->label('Refresh payment status')
+                    ->icon(Heroicon::OutlinedArrowPath)
+                    ->color('gray')
+                    ->action(function (MollieSalesInvoices $invoices, IntegrationErrorLogger $errorLogger): void {
+                        $openInvoices = AffiliateInvoice::query()->with('affiliate')->where('status', '!=', 'paid')->get();
+                        $failed = 0;
+
+                        foreach ($openInvoices as $invoice) {
+                            try {
+                                $invoices->refreshStatus($invoice);
+                            } catch (Throwable $exception) {
+                                $failed++;
+                                $errorLogger->record(Integration::Mollie, 'Check payment status', $exception, $invoice->affiliate);
+                            }
+                        }
+
+                        Notification::make()
+                            ->{$failed > 0 ? 'warning' : 'success'}()
+                            ->title(trans_choice('{0} No open invoices to check|{1} Checked 1 open invoice|[2,*] Checked :count open invoices', $openInvoices->count()))
+                            ->body($failed > 0 ? "{$failed} could not be checked; see System → Integration errors." : null)
+                            ->send();
+                    }),
                 $this->generateInvoiceAction(),
             ])
             ->recordActions([
@@ -226,10 +254,66 @@ class AffiliateInvoices extends Page implements HasTable
 
     protected function tableDescription(): string
     {
-        $notInMollie = $this->invoicedAffiliatesQuery()->whereNull('mollie_customer_id')->count();
+        $overdue = $this->overdueInvoicesCount();
 
-        return 'Active affiliates with payment method "Invoice". Partners with complete invoice details get a Mollie customer automatically, and "Generate invoice" creates and emails the invoice through Mollie.'
-            .($notInMollie > 0 ? ' '.trans_choice('{1} 1 partner is not in Mollie yet.|[2,*] :count partners are not in Mollie yet.', $notInMollie) : '');
+        return 'Active affiliates with payment method "Invoice". "Generate invoice" creates and emails the invoice through Mollie; the payment status is checked with Mollie every hour.'
+            .($overdue > 0 ? ' '.trans_choice('{1} 1 invoice is overdue.|[2,*] :count invoices are overdue.', $overdue) : '');
+    }
+
+    /**
+     * The number of unpaid invoices past their due date.
+     */
+    protected function overdueInvoicesCount(): int
+    {
+        return AffiliateInvoice::query()
+            ->where('status', '!=', 'paid')
+            ->whereNotNull('due_at')
+            ->where('due_at', '<', now()->startOfDay())
+            ->count();
+    }
+
+    protected function paymentLabel(AffiliateInvoice $invoice): string
+    {
+        if ($invoice->isPaid()) {
+            return 'Paid';
+        }
+
+        $days = $invoice->daysUntilDue();
+
+        return match (true) {
+            $days === null => 'Open',
+            $days > 1 => "Due in {$days} days",
+            $days === 1 => 'Due tomorrow',
+            $days === 0 => 'Due today',
+            $days === -1 => 'Overdue · 1 day',
+            default => 'Overdue · '.abs($days).' days',
+        };
+    }
+
+    protected function paymentColor(?AffiliateInvoice $invoice): string
+    {
+        if (! $invoice) {
+            return 'gray';
+        }
+
+        $days = $invoice->daysUntilDue();
+
+        return match (true) {
+            $invoice->isPaid() => 'success',
+            $days === null => 'gray',
+            $days < 0 => 'danger',
+            $days <= 3 => 'warning',
+            default => 'info',
+        };
+    }
+
+    protected function paymentDescription(AffiliateInvoice $invoice): ?string
+    {
+        if ($invoice->isPaid()) {
+            return $invoice->paid_at ? 'Paid on '.$invoice->paid_at->translatedFormat('j M Y') : null;
+        }
+
+        return $invoice->due_at ? 'Due '.$invoice->due_at->translatedFormat('j M Y') : null;
     }
 
     protected function generateInvoiceAction(string $name = 'generateInvoice'): Action
@@ -325,15 +409,28 @@ class AffiliateInvoices extends Page implements HasTable
                     ->rows(8)
                     ->required()
                     ->maxLength(5000)
-                    ->helperText(EmailTemplateResource::placeholderHelp(EmailTemplateType::MollieInvoice))
+                    ->helperText(MessageTemplateResource::placeholderHelp(MessageTemplateType::MollieInvoice))
                     ->visible(fn (Get $get): bool => $get('email_template') === self::CustomEmail),
+                Toggle::make('post_to_slack')
+                    ->label(fn (Get $get): string => ($channel = $this->slackChannelName($get('affiliate_id'))) ? "Post in Slack (#{$channel})" : 'Post in Slack')
+                    ->helperText('Posts a message with the invoice PDF in the partner\'s Slack channel after the invoice was sent.')
+                    ->default(true)
+                    ->live()
+                    ->visible(fn (Get $get): bool => $this->slackChannelName($get('affiliate_id')) !== null),
+                TextEntry::make('slack_preview')
+                    ->label('Slack message')
+                    ->state(fn (Get $get): ?Htmlable => ($message = $this->slackPreview($get('affiliate_id'), $get('period'), $get('amount')))
+                        ? $this->slackMessagePreview($message)
+                        : null)
+                    ->placeholder('Fill in the amount to see the Slack message.')
+                    ->visible(fn (Get $get): bool => $get('post_to_slack') && $this->slackChannelName($get('affiliate_id')) !== null),
                 TextEntry::make('invoice_summary')
                     ->label('Invoice')
                     ->state(fn (Get $get): ?array => $this->invoiceSummary($get('affiliate_id'), $get('amount')))
                     ->listWithLineBreaks()
                     ->placeholder('Pick an affiliate and an amount to see the VAT and total.'),
             ])
-            ->action(function (array $data, MollieSalesInvoices $invoices, IntegrationErrorLogger $errorLogger): void {
+            ->action(function (array $data, MollieSalesInvoices $invoices, SlackInvoiceMessages $slackMessages, IntegrationErrorLogger $errorLogger): void {
                 $affiliate = $this->invoiceableAffiliatesQuery()->findOrFail($data['affiliate_id']);
 
                 abort_if($this->whyNotInvoiceable($affiliate) !== null, 422);
@@ -341,10 +438,10 @@ class AffiliateInvoices extends Page implements HasTable
                 $period = Carbon::parse($data['period']);
                 $email = $data['email_template'] === self::CustomEmail
                     ? [
-                        'subject' => EmailTemplate::fillPlaceholders($data['email_subject'], $affiliate, $period, $this->languageOf($affiliate)),
-                        'body' => EmailTemplate::fillPlaceholders($data['email_body'], $affiliate, $period, $this->languageOf($affiliate)),
+                        'subject' => MessageTemplate::fillPlaceholders($data['email_subject'], $affiliate, $period, $this->languageOf($affiliate)),
+                        'body' => MessageTemplate::fillPlaceholders($data['email_body'], $affiliate, $period, $this->languageOf($affiliate)),
                     ]
-                    : EmailTemplate::findOrFail($data['email_template'])->renderFor($affiliate, $period);
+                    : MessageTemplate::findOrFail($data['email_template'])->renderFor($affiliate, $period);
 
                 try {
                     $invoice = $invoices->issue(
@@ -375,6 +472,26 @@ class AffiliateInvoices extends Page implements HasTable
                     ->title('Invoice '.($invoice->invoice_number ?? '').' sent to '.$invoice->sent_to)
                     ->body("{$affiliate->name} · {$invoice->description} · € ".number_format((float) ($invoice->total_amount ?? $invoice->amount), 2, ',', '.').' incl. VAT')
                     ->send();
+
+                if (($data['post_to_slack'] ?? false) && $slackMessages->canPost($affiliate)) {
+                    try {
+                        $slackMessages->post($affiliate, $invoice);
+
+                        Notification::make()
+                            ->success()
+                            ->title("Posted in Slack #{$affiliate->slack_channel_name}")
+                            ->send();
+                    } catch (Throwable $exception) {
+                        $errorLogger->record(Integration::Slack, 'Post invoice message', $exception, $affiliate);
+
+                        Notification::make()
+                            ->warning()
+                            ->title('The invoice was sent, but the Slack message failed')
+                            ->body(IntegrationErrorLogger::readableMessage($exception).' The error is logged under System → Integration errors.')
+                            ->persistent()
+                            ->send();
+                    }
+                }
             });
     }
 
@@ -416,7 +533,7 @@ class AffiliateInvoices extends Page implements HasTable
     }
 
     /**
-     * @return array{affiliate_id: ?int, period: string, amount: null, description: string, payment_term: string, email_template: ?string}
+     * @return array{affiliate_id: ?int, period: string, amount: null, description: string, payment_term: string, email_template: ?string, post_to_slack: bool}
      */
     protected function defaultInvoiceData(?Affiliate $affiliate = null): array
     {
@@ -429,6 +546,7 @@ class AffiliateInvoices extends Page implements HasTable
             'description' => $this->defaultDescription($affiliate?->getKey(), $period),
             'payment_term' => PaymentTerm::DAYS_30,
             'email_template' => $this->defaultEmailTemplateId($affiliate?->getKey()),
+            'post_to_slack' => true,
         ];
     }
 
@@ -439,13 +557,14 @@ class AffiliateInvoices extends Page implements HasTable
      */
     protected function emailTemplateOptions(): array
     {
-        return EmailTemplate::query()
-            ->where('type', EmailTemplateType::MollieInvoice)
+        return MessageTemplate::query()
+            ->where('type', MessageTemplateType::MollieInvoice)
             ->orderByDesc('is_default')
             ->orderBy('name')
             ->get()
-            ->groupBy(fn (EmailTemplate $template): string => $template->language->getLabel())
-            ->map(fn ($templates): array => $templates->mapWithKeys(fn (EmailTemplate $template): array => [(string) $template->getKey() => $template->name])->all())
+            ->sortBy(fn (MessageTemplate $template): int => array_search($template->language, InvoiceLanguage::cases(), true))
+            ->groupBy(fn (MessageTemplate $template): string => $template->language->getLabel())
+            ->map(fn ($templates): array => $templates->mapWithKeys(fn (MessageTemplate $template): array => [(string) $template->getKey() => $template->name])->all())
             ->put('Other', [self::CustomEmail => 'Custom – write the email for this invoice'])
             ->all();
     }
@@ -456,7 +575,7 @@ class AffiliateInvoices extends Page implements HasTable
     protected function defaultEmailTemplateId(mixed $affiliateId): ?string
     {
         $affiliate = filled($affiliateId) ? Affiliate::find($affiliateId) : null;
-        $template = EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, $affiliate ? $this->languageOf($affiliate) : InvoiceLanguage::Dutch);
+        $template = MessageTemplate::defaultFor(MessageTemplateType::MollieInvoice, $affiliate ? $this->languageOf($affiliate) : InvoiceLanguage::Dutch);
 
         return $template ? (string) $template->getKey() : null;
     }
@@ -469,7 +588,7 @@ class AffiliateInvoices extends Page implements HasTable
     protected function renderEmail(mixed $affiliateId, ?string $period, mixed $templateId): ?array
     {
         $affiliate = filled($affiliateId) ? Affiliate::find($affiliateId) : null;
-        $template = filled($templateId) && $templateId !== self::CustomEmail ? EmailTemplate::find($templateId) : null;
+        $template = filled($templateId) && $templateId !== self::CustomEmail ? MessageTemplate::find($templateId) : null;
 
         if (! $affiliate || ! $template) {
             return null;
@@ -506,6 +625,55 @@ class AffiliateInvoices extends Page implements HasTable
             '<div style="border: 1px solid rgb(127 127 127 / 0.25); border-radius: 0.5rem; padding: 0.75rem 1rem;">'
                 .'<div style="font-weight: 600; padding-bottom: 0.5rem; margin-bottom: 0.5rem; border-bottom: 1px solid rgb(127 127 127 / 0.2);">'.e($email['subject']).'</div>'
                 .'<div style="white-space: pre-line;">'.e($email['body']).'</div>'
+            .'</div>'
+        );
+    }
+
+    /**
+     * The affiliate's Slack channel name when a message can be posted there, otherwise null.
+     */
+    protected function slackChannelName(mixed $affiliateId): ?string
+    {
+        $affiliate = filled($affiliateId) ? Affiliate::find($affiliateId) : null;
+
+        return $affiliate && app(SlackInvoiceMessages::class)->canPost($affiliate) ? $affiliate->slack_channel_name : null;
+    }
+
+    /**
+     * The Slack message as it will look, before the invoice exists: the invoice number is assigned by Mollie.
+     */
+    protected function slackPreview(mixed $affiliateId, ?string $period, mixed $amount): ?string
+    {
+        $affiliate = filled($affiliateId) ? $this->invoicedAffiliatesQuery()->find($affiliateId) : null;
+
+        if (! $affiliate || ! is_numeric($amount) || (float) $amount <= 0) {
+            return null;
+        }
+
+        $net = (float) $amount;
+        $total = $net + round($net * (float) InvoiceVat::rateFor($affiliate) / 100, 2);
+
+        return app(SlackInvoiceMessages::class)->message(
+            $affiliate,
+            $period ? Carbon::parse($period) : now()->subMonthNoOverflow(),
+            '[invoice number]',
+            SlackInvoiceMessages::formatAmount($total),
+            (string) $affiliate->invoice_email,
+        );
+    }
+
+    /**
+     * A Slack-like preview: mentions shown as @member, *bold* text in bold, with the attached PDF.
+     */
+    protected function slackMessagePreview(string $message): Htmlable
+    {
+        $text = preg_replace('/&lt;@([A-Z0-9]+)&gt;/', '<span style="color: #1d9bd1; background: rgb(29 155 209 / 0.12); border-radius: 0.25rem; padding: 0 0.125rem;">@$1</span>', e($message));
+        $text = preg_replace('/\*([^*\n]+)\*/', '<strong>$1</strong>', $text);
+
+        return new HtmlString(
+            '<div style="border-left: 4px solid #4a154b; border-radius: 0.375rem; padding: 0.5rem 0.75rem; background: rgb(127 127 127 / 0.06);">'
+                .'<div style="white-space: pre-line;">'.$text.'</div>'
+                .'<div style="display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.5rem; padding: 0.25rem 0.5rem; border-radius: 0.375rem; box-shadow: inset 0 0 0 1px rgb(127 127 127 / 0.25); font-size: 0.75rem;">📄 Invoice PDF</div>'
             .'</div>'
         );
     }

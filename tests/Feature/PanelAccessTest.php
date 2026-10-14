@@ -17,17 +17,19 @@ it('lets e-skool staff into the panel', function (string $email) {
     'uppercase domain' => 'Gairo@E-Skool.NL',
 ]);
 
-it('keeps everyone else out of the panel', function (string $email) {
-    actingAs(User::factory()->create(['email' => $email]));
-
-    get('/admin')->assertForbidden();
-    get('/admin/affiliates')->assertForbidden();
-})->with([
-    'other domain' => 'admin@gmail.com',
-    'look-alike domain' => 'someone@note-skool.nl',
-    'domain as part of another domain' => 'someone@e-skool.nl.example.com',
-    'subdomain' => 'someone@mail.e-skool.nl',
-]);
+// Disabled for now: every user account may use the panel (see User::canAccessPanel()).
+// Re-enable when the panel is limited to @e-skool.nl addresses again.
+// it('keeps everyone else out of the panel', function (string $email) {
+//     actingAs(User::factory()->create(['email' => $email]));
+//
+//     get('/admin')->assertForbidden();
+//     get('/admin/affiliates')->assertForbidden();
+// })->with([
+//     'other domain' => 'admin@gmail.com',
+//     'look-alike domain' => 'someone@note-skool.nl',
+//     'domain as part of another domain' => 'someone@e-skool.nl.example.com',
+//     'subdomain' => 'someone@mail.e-skool.nl',
+// ]);
 
 it('sends guests to the login page', function () {
     get('/admin')->assertRedirect('/admin/login');

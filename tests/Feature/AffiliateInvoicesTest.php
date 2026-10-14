@@ -15,6 +15,7 @@ use App\Support\InvoiceVat;
 use Filament\Actions\Action;
 use Filament\Actions\Testing\TestAction;
 use Filament\Forms\Components\Select;
+use Filament\Tables\Columns\TextColumn;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
@@ -22,6 +23,7 @@ use Mollie\Api\Fake\MockResponse;
 use Mollie\Api\Http\PendingRequest;
 use Mollie\Api\Http\Requests\CreateCustomerRequest;
 use Mollie\Api\Http\Requests\CreateSalesInvoiceRequest;
+use Mollie\Api\Http\Requests\GetSalesInvoiceRequest;
 use Mollie\Laravel\Facades\Mollie;
 
 use function Pest\Laravel\actingAs;
@@ -66,7 +68,7 @@ it('shows whether the invoice details are complete', function () {
 it('is listed as invoices under the affiliates menu', function () {
     get(AffiliateInvoices::getUrl())
         ->assertOk()
-        ->assertSeeInOrder(['Affiliates', 'All affiliates', 'Invoices', 'System', 'Email templates', 'Slack settings', 'Integration errors'])
+        ->assertSeeInOrder(['Affiliates', 'All affiliates', 'Invoices', 'System', 'Templates', 'Slack settings', 'Integration errors'])
         ->assertSee('Mollie');
 });
 
@@ -377,17 +379,48 @@ it('adds the new month to the invoice periods when it starts', function () {
             && array_key_last($field->getOptions()) === '2026-05-01');
 });
 
-it('shows whether a partner is in mollie with its customer id', function () {
-    $inMollie = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create(['mollie_customer_id' => 'cst_8wmqcHMN4U']));
-    $notInMollie = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create(['mollie_customer_id' => null]));
+it('shows whether the last invoice is paid or when it is due', function (array $invoice, string $label, string $color, ?string $description) {
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create());
+    AffiliateInvoice::factory()->for($affiliate)->create($invoice);
 
     Livewire::test(AffiliateInvoices::class)
-        ->assertTableColumnFormattedStateSet('mollie_customer_id', 'In Mollie', $inMollie)
-        ->assertTableColumnHasDescription('mollie_customer_id', 'cst_8wmqcHMN4U', $inMollie)
-        ->assertTableColumnStateNotSet('mollie_customer_id', 'cst_8wmqcHMN4U', $notInMollie)
-        ->assertSee('1 partner is not in Mollie yet.');
+        ->assertTableColumnStateSet('payment_status', $label, $affiliate)
+        ->assertTableColumnExists('payment_status', fn (TextColumn $column): bool => $column->getColor($label) === $color, $affiliate)
+        ->assertTableColumnHasDescription('payment_status', $description, $affiliate);
+})->with([
+    'paid' => [['status' => 'paid', 'due_at' => '2026-10-20', 'paid_at' => '2026-10-05'], 'Paid', 'success', 'Paid on 5 Oct 2026'],
+    'due in 12 days' => [['status' => 'issued', 'due_at' => '2026-10-19'], 'Due in 12 days', 'info', 'Due 19 Oct 2026'],
+    'due tomorrow' => [['status' => 'issued', 'due_at' => '2026-10-08'], 'Due tomorrow', 'warning', 'Due 8 Oct 2026'],
+    'due today' => [['status' => 'issued', 'due_at' => '2026-10-07'], 'Due today', 'warning', 'Due 7 Oct 2026'],
+    'overdue' => [['status' => 'issued', 'due_at' => '2026-10-04'], 'Overdue · 3 days', 'danger', 'Due 4 Oct 2026'],
+]);
+
+it('counts the overdue invoices on the mollie tab', function () {
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create());
+    AffiliateInvoice::factory()->for($affiliate)->count(2)->create(['status' => 'issued', 'due_at' => '2026-10-01']);
+    AffiliateInvoice::factory()->for($affiliate)->create(['status' => 'paid', 'due_at' => '2026-10-01']);
+
+    Livewire::test(AffiliateInvoices::class)
+        ->assertSee('2 invoices are overdue.');
 });
 
+it('refreshes the payment status of open invoices from mollie', function () {
+    config(['mollie.key' => 'live_'.str_repeat('a', 30)]);
+    Mollie::fake([
+        GetSalesInvoiceRequest::class => MockResponse::ok(['resource' => 'sales-invoice', 'id' => 'invoice_open', 'status' => 'paid', 'dueAt' => '2026-10-28']),
+    ]);
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create());
+    $invoice = AffiliateInvoice::factory()->for($affiliate)->create(['mollie_sales_invoice_id' => 'invoice_open', 'status' => 'issued', 'due_at' => '2026-10-28']);
+
+    Livewire::test(AffiliateInvoices::class)
+        ->callAction(TestAction::make('refreshPaymentStatus')->table())
+        ->assertNotified('Checked 1 open invoice');
+
+    expect($invoice->refresh())
+        ->status->toBe('paid')
+        ->paid_at->not->toBeNull()
+        ->status_checked_at->not->toBeNull();
+});
 it('adds a complete partner that is not in mollie yet to mollie', function () {
     config(['mollie.key' => 'live_'.str_repeat('a', 30)]);
     Mollie::fake([

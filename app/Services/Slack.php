@@ -61,17 +61,52 @@ class Slack
     }
 
     /**
+     * Post a message in a channel.
+     */
+    public function postMessage(string $channelId, string $text): void
+    {
+        $this->call('chat.postMessage', [
+            'channel' => $channelId,
+            'text' => $text,
+        ]);
+    }
+
+    /**
+     * Upload a file to a channel, with a message posted together with it.
+     */
+    public function uploadFile(string $channelId, string $filename, string $contents, string $message): void
+    {
+        $upload = $this->call('files.getUploadURLExternal', [
+            'filename' => $filename,
+            'length' => strlen($contents),
+        ], asForm: true);
+
+        Http::withBody($contents, 'application/octet-stream')
+            ->timeout(60)
+            ->post($upload['upload_url'])
+            ->throw();
+
+        $this->call('files.completeUploadExternal', [
+            'files' => json_encode([['id' => $upload['file_id'], 'title' => $filename]]),
+            'channel_id' => $channelId,
+            'initial_comment' => $message,
+        ], asForm: true);
+    }
+
+    /**
      * Call a Slack Web API method, throwing when Slack reports an error.
      *
      * @param  array<string, mixed>  $payload
      * @param  list<string>  $ignoredErrors
      * @return array<string, mixed>
      */
-    private function call(string $method, array $payload, array $ignoredErrors = []): array
+    private function call(string $method, array $payload, array $ignoredErrors = [], bool $asForm = false): array
     {
-        $response = Http::withToken(config('services.slack.notifications.bot_user_oauth_token'))
+        $request = Http::withToken(config('services.slack.notifications.bot_user_oauth_token'))
             ->acceptJson()
-            ->timeout(30)
+            ->timeout(30);
+
+        $response = ($asForm ? $request->asForm() : $request)
             ->post(self::ApiUrl."/{$method}", $payload)
             ->throw()
             ->json();
