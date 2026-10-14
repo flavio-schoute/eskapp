@@ -12,6 +12,7 @@ use App\Models\IntegrationError;
 use App\Models\User;
 use App\Services\IntegrationErrorLogger;
 use Filament\Actions\Testing\TestAction;
+use Filament\Tables\Columns\TextColumn;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -147,4 +148,53 @@ it('turns an html error page into a readable message', function () {
     expect(IntegrationErrorLogger::readableMessage(new RuntimeException($html)))
         ->toBe('The service returned a server error (500 Internal Server Error) instead of a response. This is a problem on their side.')
         ->and(IntegrationErrorLogger::readableMessage(new RuntimeException('missing_scope')))->toBe('missing_scope');
+});
+
+it('shows a short error in the list and copies the full error with the request body', function () {
+    $error = IntegrationError::factory()->create([
+        'message' => '[2026-10-14T15:13:56+00:00] Error executing API call (422: Unprocessable Content): Either recipient.organizationNumber or recipient.vatNumber must be provided.. Request body: {"currency":"EUR","status":"issued"}',
+    ]);
+
+    expect($error->summary())->toBe('Error executing API call (422: Unprocessable Content): Either recipient.organizationNumber or recipient.vatNumber must be provided..')
+        ->and($error->requestBody())->toBe("{\n    \"currency\": \"EUR\",\n    \"status\": \"issued\"\n}");
+
+    Livewire::test(ManageIntegrationErrors::class)
+        ->assertTableColumnFormattedStateSet('message', $error->summary(), $error)
+        ->assertTableColumnExists('message', fn (TextColumn $column): bool => $column->isCopyable($error->message)
+            && $column->getCopyableState($error->message) === $error->message, $error);
+});
+
+it('opens the full error details', function () {
+    $error = IntegrationError::factory()->create([
+        'integration' => Integration::Mollie,
+        'action' => 'Generate invoice',
+        'message' => 'Something went wrong. Request body: {"currency":"EUR"}',
+    ]);
+
+    Livewire::test(ManageIntegrationErrors::class)
+        ->assertActionHasLabel(TestAction::make('view')->table($error), 'Details')
+        ->mountAction(TestAction::make('view')->table($error))
+        ->assertActionMounted(TestAction::make('view')->table($error));
+});
+
+it('has no request body section for errors without one', function () {
+    $error = IntegrationError::factory()->create(['message' => 'missing_scope']);
+
+    expect($error->summary())->toBe('missing_scope')
+        ->and($error->requestBody())->toBeNull();
+});
+
+it('marks all unresolved errors as resolved at once', function () {
+    IntegrationError::factory()->count(3)->create();
+    $alreadyResolved = IntegrationError::factory()->resolved()->create(['resolved_at' => now()->subWeek()]);
+
+    Livewire::test(ManageIntegrationErrors::class)
+        ->assertActionVisible('resolveAll')
+        ->assertActionHasLabel('resolveAll', 'Mark all resolved (3)')
+        ->callAction('resolveAll')
+        ->assertNotified('3 errors marked as resolved')
+        ->assertActionHidden('resolveAll');
+
+    expect(IntegrationError::unresolved()->count())->toBe(0)
+        ->and($alreadyResolved->refresh()->resolved_at->isSameDay(now()->subWeek()))->toBeTrue();
 });

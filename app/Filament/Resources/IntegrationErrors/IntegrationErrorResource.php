@@ -6,19 +6,26 @@ use App\Enums\Integration;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Filament\Resources\IntegrationErrors\Pages\ManageIntegrationErrors;
 use App\Models\IntegrationError;
+use App\Support\JsonCodeBlock;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\ViewAction;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use UnitEnum;
@@ -31,7 +38,7 @@ class IntegrationErrorResource extends Resource
 
     protected static ?string $navigationLabel = 'Integration errors';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     public static function canCreate(): bool
     {
@@ -55,10 +62,57 @@ class IntegrationErrorResource extends Resource
         return 'Unresolved errors';
     }
 
+    public static function infolist(Schema $schema): Schema
+    {
+        return $schema
+            ->components([
+                Section::make()
+                    ->columns(3)
+                    ->columnSpanFull()
+                    ->schema([
+                        TextEntry::make('integration')
+                            ->badge(),
+                        TextEntry::make('action')
+                            ->label('Step'),
+                        TextEntry::make('affiliate.name')
+                            ->label('Affiliate')
+                            ->url(fn (IntegrationError $record): ?string => $record->affiliate ? AffiliateResource::getUrl('view', ['record' => $record->affiliate]) : null)
+                            ->color('primary')
+                            ->placeholder('Deleted affiliate'),
+                        TextEntry::make('last_occurred_at')
+                            ->label('Last seen')
+                            ->dateTime(),
+                        TextEntry::make('occurrences')
+                            ->label('Times'),
+                        TextEntry::make('resolved_at')
+                            ->label('Resolved')
+                            ->dateTime()
+                            ->placeholder('Not resolved'),
+                    ]),
+                TextEntry::make('error_summary')
+                    ->label('Error')
+                    ->state(fn (IntegrationError $record): string => $record->summary())
+                    ->copyable()
+                    ->copyableState(fn (IntegrationError $record): string => $record->message)
+                    ->copyMessage('Full error copied')
+                    ->helperText('Click to copy the full error, including the request body.')
+                    ->columnSpanFull(),
+                TextEntry::make('request_body')
+                    ->label('Request body')
+                    ->state(fn (IntegrationError $record): ?string => $record->requestBody())
+                    ->formatStateUsing(fn (string $state): Htmlable => JsonCodeBlock::render($state, json_validate($state) ? 'JSON' : 'Text'))
+                    ->copyable()
+                    ->copyableState(fn (IntegrationError $record): ?string => $record->requestBody())
+                    ->copyMessage('Request body copied')
+                    ->visible(fn (IntegrationError $record): bool => $record->requestBody() !== null)
+                    ->columnSpanFull(),
+            ]);
+    }
+
     public static function table(Table $table): Table
     {
         return $table
-            ->description('Google Drive and Slack steps that failed. The affiliate itself was always saved.')
+            ->description('Google Drive, Slack and Mollie steps that failed. The affiliate itself was always saved. Click an error to copy it, or open Details to see everything.')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('affiliate'))
             ->defaultSort('last_occurred_at', 'desc')
             ->columns([
@@ -82,9 +136,12 @@ class IntegrationErrorResource extends Resource
                     ->placeholder('Deleted affiliate'),
                 TextColumn::make('message')
                     ->label('Error')
+                    ->formatStateUsing(fn (IntegrationError $record): string => $record->summary())
                     ->wrap()
                     ->lineClamp(2)
-                    ->tooltip(fn (IntegrationError $record): string => $record->message)
+                    ->copyable()
+                    ->copyableState(fn (IntegrationError $record): string => $record->message)
+                    ->copyMessage('Full error copied')
                     ->searchable(),
                 TextColumn::make('occurrences')
                     ->label('Times')
@@ -105,7 +162,12 @@ class IntegrationErrorResource extends Resource
                 SelectFilter::make('integration')
                     ->options(Integration::class),
             ])
+            ->recordAction('view')
             ->recordActions([
+                ViewAction::make()
+                    ->label('Details')
+                    ->modalHeading(fn (IntegrationError $record): string => "{$record->integration->getLabel()} · {$record->action} failed")
+                    ->modalWidth(Width::FourExtraLarge),
                 Action::make('resolve')
                     ->label('Mark resolved')
                     ->icon(Heroicon::OutlinedCheck)

@@ -28,11 +28,6 @@ class User extends Authenticatable implements FilamentUser
     public const StaffEmailDomain = 'e-skool.nl';
 
     /**
-     * The only user who may change the invoice settings, such as creating invoices via the Mollie API.
-     */
-    public const InvoiceSettingsManagerEmail = 'flavio@e-skool.nl';
-
-    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -52,11 +47,5 @@ class User extends Authenticatable implements FilamentUser
     {
         return true;
         // return Str::of($this->email)->lower()->endsWith('@'.self::StaffEmailDomain);
-    }
-
-    public function canManageInvoiceSettings(): bool
-    {
-        return true;
-        // return Str::lower($this->email) === self::InvoiceSettingsManagerEmail;
     }
 }

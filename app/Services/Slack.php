@@ -43,21 +43,21 @@ class Slack
     }
 
     /**
-     * Invite users to a channel, skipping users that cannot be invited instead of failing the whole call.
+     * Invite users to a channel. By default users that cannot be invited are skipped instead of failing the whole call.
      *
      * @param  list<string>  $userIds
      */
-    public function inviteUsers(string $channelId, array $userIds): void
+    public function inviteUsers(string $channelId, array $userIds, bool $skipUsersThatCannotBeInvited = true): void
     {
         if ($userIds === []) {
             return;
         }
 
-        $this->call('conversations.invite', [
+        $this->call('conversations.invite', array_filter([
             'channel' => $channelId,
             'users' => implode(',', $userIds),
-            'force' => true,
-        ], ignoredErrors: ['already_in_channel', 'cant_invite_self']);
+            'force' => $skipUsersThatCannotBeInvited ?: null,
+        ]), ignoredErrors: ['already_in_channel', 'cant_invite_self']);
     }
 
     /**

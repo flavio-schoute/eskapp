@@ -7,7 +7,6 @@ use App\Enums\AffiliateStatus;
 use App\Enums\AffiliateType;
 use App\Enums\InvoiceLanguage;
 use App\Models\Affiliate;
-use App\Services\MollieInvoicingCustomersExport;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -50,14 +49,6 @@ class AffiliateFactory extends Factory
             'invoice_email' => fake()->companyEmail(),
             'invoice_language' => InvoiceLanguage::Dutch,
         ]);
-    }
-
-    /**
-     * Mark the affiliate as uploaded to Mollie Invoicing with its current invoice details.
-     */
-    public function exportedToMollie(): static
-    {
-        return $this->afterCreating(fn (Affiliate $affiliate) => app(MollieInvoicingCustomersExport::class)->markAsExported(collect([$affiliate])));
     }
 
     public function pipeline(): static

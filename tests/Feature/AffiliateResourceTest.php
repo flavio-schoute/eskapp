@@ -239,12 +239,11 @@ it('validates the invoice email address', function () {
         ->assertHasFormErrors(['invoice_email' => 'email']);
 });
 
-it('groups affiliates and slack members under one affiliates menu', function () {
+it('groups the affiliate pages under affiliates and the settings under system', function () {
     get('/admin/affiliates')
         ->assertOk()
-        ->assertSeeInOrder(['e-Skool Tools', 'Affiliates', 'All affiliates', 'Slack members']);
+        ->assertSeeInOrder(['e-Skool Tools', 'Affiliates', 'All affiliates', 'Invoices', 'System', 'Email templates', 'Slack settings', 'Integration errors']);
 });
-
 it('lists affiliates paid by invoice first by default, then by name', function () {
     $automatic = Affiliate::factory()->create(['name' => 'Alpha', 'payment_method' => AffiliatePaymentMethod::Automatic]);
     $other = Affiliate::factory()->create(['name' => 'Bravo', 'payment_method' => AffiliatePaymentMethod::Other]);

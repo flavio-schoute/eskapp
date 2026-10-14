@@ -31,7 +31,7 @@ class MollieSalesInvoices
     /**
      * Create, issue and email an invoice with one commission line, and keep a record of it.
      */
-    public function issue(Affiliate $affiliate, Carbon $period, string $amount, string $description, string $paymentTerm, ?User $creator = null): AffiliateInvoice
+    public function issue(Affiliate $affiliate, Carbon $period, string $amount, string $description, string $paymentTerm, string $emailSubject, string $emailBody, ?User $creator = null): AffiliateInvoice
     {
         if (! $this->customers->isConfigured()) {
             throw new RuntimeException('Mollie is not configured.');
@@ -50,7 +50,7 @@ class MollieSalesInvoices
             recipient: $this->recipient($affiliate),
             lines: new DataCollection([new InvoiceLine($description, 1, $vatRate, new Money('EUR', $unitPrice))]),
             memo: InvoiceVat::invoiceNote($affiliate),
-            emailDetails: $this->emailDetails($affiliate, $period),
+            emailDetails: new EmailDetails($emailSubject, $emailBody),
         );
 
         $invoice = Mollie::send($salesInvoiceRequest);
@@ -96,24 +96,6 @@ class MollieSalesInvoices
             streetAdditional: $affiliate->invoice_address_line_2 ?: null,
             region: $affiliate->invoice_region ?: null,
         );
-    }
-
-    private function emailDetails(Affiliate $affiliate, Carbon $period): EmailDetails
-    {
-        $language = $this->language($affiliate);
-        $month = $period->locale($language->value)->translatedFormat('F Y');
-        $contact = $affiliate->invoice_contact_person;
-
-        return match ($language) {
-            InvoiceLanguage::Dutch => new EmailDetails(
-                "Factuur affiliate commissie {$month}",
-                ($contact ? "Beste {$contact}," : 'Beste,')."\n\nIn de bijlage vind je de factuur voor de affiliate commissie van {$month}.\n\nMet vriendelijke groet,\ne-Skool",
-            ),
-            default => new EmailDetails(
-                "Invoice affiliate commission {$month}",
-                ($contact ? "Dear {$contact}," : 'Hello,')."\n\nPlease find attached the invoice for the affiliate commission of {$month}.\n\nKind regards,\ne-Skool",
-            ),
-        };
     }
 
     private function language(?Affiliate $affiliate): InvoiceLanguage

@@ -6,9 +6,7 @@ use App\Enums\AffiliatePaymentMethod;
 use App\Enums\AffiliateStatus;
 use App\Enums\AffiliateType;
 use App\Enums\InvoiceLanguage;
-use App\Enums\MollieExportStatus;
 use App\Observers\AffiliateObserver;
-use App\Services\MollieInvoicingCustomersExport;
 use App\Support\InvoiceAddressFormat;
 use Database\Factories\AffiliateFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -49,9 +47,9 @@ use Illuminate\Support\Str;
     'agreement_drive_url',
     'slack_channel_id',
     'slack_channel_name',
+    'slack_contact_name',
+    'slack_contact_member_id',
     'mollie_customer_id',
-    'mollie_exported_at',
-    'mollie_export_fingerprint',
 ])]
 #[ObservedBy(AffiliateObserver::class)]
 class Affiliate extends Model
@@ -71,7 +69,6 @@ class Affiliate extends Model
             'status' => AffiliateStatus::class,
             'payment_method' => AffiliatePaymentMethod::class,
             'invoice_language' => InvoiceLanguage::class,
-            'mollie_exported_at' => 'datetime',
             'password' => 'encrypted',
         ];
     }
@@ -160,20 +157,6 @@ class Affiliate extends Model
     public function hasCompleteInvoiceDetails(): bool
     {
         return $this->missingInvoiceDetails() === [];
-    }
-
-    /**
-     * Whether this affiliate is in the latest Mollie Invoicing customer export, and whether its details changed since.
-     */
-    public function mollieExportStatus(): MollieExportStatus
-    {
-        if (blank($this->mollie_export_fingerprint)) {
-            return MollieExportStatus::NotExported;
-        }
-
-        return hash_equals($this->mollie_export_fingerprint, app(MollieInvoicingCustomersExport::class)->fingerprint($this))
-            ? MollieExportStatus::Exported
-            : MollieExportStatus::ChangedSinceExport;
     }
 
     /**

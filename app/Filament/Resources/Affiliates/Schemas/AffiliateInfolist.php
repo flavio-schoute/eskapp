@@ -6,6 +6,7 @@ use App\Models\Affiliate;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 
 class AffiliateInfolist
 {
@@ -29,6 +30,16 @@ class AffiliateInfolist
                             ->url(fn (Affiliate $record): ?string => $record->slackChannelUrl(), shouldOpenInNewTab: true)
                             ->color('primary')
                             ->placeholder('No channel yet'),
+                        TextEntry::make('slack_contact_name')
+                            ->label('Slack contact person')
+                            ->placeholder('-')
+                            ->columnSpan(2),
+                        TextEntry::make('slack_contact_member_id')
+                            ->label('Slack member ID')
+                            ->fontFamily('mono')
+                            ->copyable()
+                            ->placeholder('-')
+                            ->columnSpan(2),
                     ]),
                 Section::make('Access')
                     ->columns(3)
@@ -99,9 +110,14 @@ class AffiliateInfolist
                             ->placeholder('-'),
                         TextEntry::make('mollie_customer_id')
                             ->label('Mollie customer')
-                            ->fontFamily('mono')
+                            ->formatStateUsing(fn (string $state): string => "In Mollie · {$state}")
+                            ->badge()
+                            ->color('success')
+                            ->icon(Heroicon::OutlinedCheckCircle)
                             ->copyable()
-                            ->placeholder('Not created yet'),
+                            ->copyableState(fn (Affiliate $record): ?string => $record->mollie_customer_id)
+                            ->copyMessage('Mollie customer ID copied')
+                            ->placeholder('Not in Mollie yet'),
                         TextEntry::make('invoice_phone')
                             ->label('Phone number')
                             ->url(fn (?string $state): ?string => $state ? 'tel:'.preg_replace('/[^\d+]/', '', $state) : null)

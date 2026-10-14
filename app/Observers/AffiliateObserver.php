@@ -56,8 +56,16 @@ class AffiliateObserver
 
         if (blank($affiliate->slack_channel_id)) {
             $this->attempt(Integration::Slack, 'Create channel', $affiliate, fn () => $this->slackSync->ensureChannel($affiliate));
-        } elseif ($affiliate->wasChanged(['name', 'type'])) {
+
+            return;
+        }
+
+        if ($affiliate->wasChanged(['name', 'type'])) {
             $this->attempt(Integration::Slack, 'Rename channel', $affiliate, fn () => $this->slackSync->renameChannel($affiliate));
+        }
+
+        if ($affiliate->wasChanged('slack_contact_member_id') && filled($affiliate->slack_contact_member_id)) {
+            $this->attempt(Integration::Slack, 'Invite contact', $affiliate, fn () => $this->slackSync->inviteContact($affiliate));
         }
     }
 

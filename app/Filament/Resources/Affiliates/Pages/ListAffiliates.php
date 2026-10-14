@@ -20,7 +20,7 @@ class ListAffiliates extends ListRecords
     {
         return [
             Action::make('manageSlackMembers')
-                ->label('Manage Slack members')
+                ->label('Slack settings')
                 ->icon(Heroicon::OutlinedChatBubbleLeftRight)
                 ->color('gray')
                 ->url(SlackMemberResource::getUrl()),

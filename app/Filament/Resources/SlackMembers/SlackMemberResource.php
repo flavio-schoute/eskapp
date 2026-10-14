@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\SlackMembers;
 
 use App\Filament\Resources\SlackMembers\Pages\ManageSlackMembers;
+use App\Filament\Resources\SlackMembers\Widgets\AffiliateSlackChannels;
 use App\Models\SlackMember;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -22,11 +23,11 @@ class SlackMemberResource extends Resource
 {
     protected static ?string $model = SlackMember::class;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Affiliates';
+    protected static string|UnitEnum|null $navigationGroup = 'System';
 
     protected static ?int $navigationSort = 2;
 
-    protected static ?string $navigationLabel = 'Slack members';
+    protected static ?string $navigationLabel = 'Slack settings';
 
     protected static ?string $modelLabel = 'Slack member';
 
@@ -39,26 +40,35 @@ class SlackMemberResource extends Resource
                 TextInput::make('name')
                     ->required()
                     ->maxLength(255),
-                TextInput::make('slack_user_id')
-                    ->label('Slack member ID')
-                    ->helperText('In Slack: open the person\'s profile → ⋮ (more) → Copy member ID.')
-                    ->placeholder('U0926AJE52T')
+                static::memberIdField('slack_user_id')
                     ->required()
-                    ->regex('/^\s*[UW][A-Z0-9]{8,}\s*$/i')
-                    ->validationMessages(['regex' => 'A Slack member ID starts with U or W, followed by capital letters and numbers.'])
-                    ->unique(ignoreRecord: true)
-                    ->dehydrateStateUsing(fn (string $state): string => strtoupper(trim($state))),
+                    ->unique(ignoreRecord: true),
                 Toggle::make('is_active')
                     ->label('Add to new affiliate channels')
                     ->default(true),
             ]);
     }
 
+    /**
+     * A Slack member ID input: checks the format and saves it in capitals.
+     */
+    public static function memberIdField(string $name): TextInput
+    {
+        return TextInput::make($name)
+            ->label('Slack member ID')
+            ->helperText('In Slack: open the person\'s profile → ⋮ (more) → Copy member ID.')
+            ->placeholder('U0926AJE52T')
+            ->regex('/^\s*[UW][A-Z0-9]{8,}\s*$/i')
+            ->validationMessages(['regex' => 'A Slack member ID starts with U or W, followed by capital letters and numbers.'])
+            ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? strtoupper(trim($state)) : null);
+    }
+
     public static function table(Table $table): Table
     {
         return $table
             ->recordTitleAttribute('name')
-            ->description('These people are invited to every new private affiliate channel.')
+            ->heading('Team members')
+            ->description('These people from our team are invited to every new private affiliate channel.')
             ->defaultSort('name')
             ->columns([
                 TextColumn::make('name')
@@ -92,6 +102,13 @@ class SlackMemberResource extends Resource
                         ->successNotificationTitle('Selected Slack members removed'),
                 ]),
             ]);
+    }
+
+    public static function getWidgets(): array
+    {
+        return [
+            AffiliateSlackChannels::class,
+        ];
     }
 
     public static function getPages(): array

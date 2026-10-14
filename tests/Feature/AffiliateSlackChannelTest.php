@@ -5,9 +5,12 @@ use App\Enums\AffiliateStatus;
 use App\Enums\AffiliateType;
 use App\Filament\Resources\Affiliates\Pages\CreateAffiliate;
 use App\Filament\Resources\Affiliates\Pages\EditAffiliate;
+use App\Filament\Resources\SlackMembers\Widgets\AffiliateSlackChannels;
 use App\Models\Affiliate;
+use App\Models\IntegrationError;
 use App\Models\SlackMember;
 use App\Models\User;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -156,4 +159,84 @@ it('does not call slack when no bot token is configured', function () {
     Affiliate::factory()->create();
 
     Http::assertNothingSent();
+});
+
+it('invites the partner\'s slack contact when the channel is created', function () {
+    fakeSlack();
+
+    Affiliate::factory()->create([
+        'name' => 'Test KFB',
+        'type' => AffiliateType::Partnership,
+        'slack_contact_name' => 'Kim',
+        'slack_contact_member_id' => 'U0PARTNER01',
+    ]);
+
+    Http::assertSent(fn (Request $request): bool => $request->url() === 'https://slack.com/api/conversations.invite'
+        && $request['users'] === 'U0PARTNER01'
+        && ! isset($request['force']));
+});
+
+it('invites the partner\'s slack contact when the member id is added later', function () {
+    fakeSlack();
+
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->create([
+        'slack_channel_id' => 'C123',
+        'slack_channel_name' => 'acme-affiliate',
+    ]));
+
+    $affiliate->update(['slack_contact_member_id' => 'U0PARTNER01']);
+
+    Http::assertSent(fn (Request $request): bool => $request->url() === 'https://slack.com/api/conversations.invite'
+        && $request['channel'] === 'C123'
+        && $request['users'] === 'U0PARTNER01');
+});
+
+it('logs it when the partner\'s slack contact cannot be invited', function () {
+    Http::fake([
+        'slack.com/api/conversations.invite' => Http::response(['ok' => false, 'error' => 'user_not_found']),
+    ]);
+
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->create([
+        'slack_channel_id' => 'C123',
+        'slack_channel_name' => 'acme-affiliate',
+    ]));
+
+    $affiliate->update(['slack_contact_member_id' => 'U0UNKNOWN01']);
+
+    expect(IntegrationError::where('action', 'Invite contact')->sole()->message)->toBe('Slack conversations.invite failed: user_not_found');
+});
+
+it('lists the affiliate channels and lets you add the partner\'s contact', function () {
+    fakeSlack();
+
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->create([
+        'slack_channel_id' => 'C123',
+        'slack_channel_name' => 'acme-affiliate',
+    ]));
+    $withoutChannel = Affiliate::withoutEvents(fn () => Affiliate::factory()->create(['slack_channel_id' => null]));
+
+    Livewire::test(AffiliateSlackChannels::class)
+        ->assertCanSeeTableRecords([$affiliate])
+        ->assertCanNotSeeTableRecords([$withoutChannel])
+        ->callAction(TestAction::make('editContact')->table($affiliate), data: [
+            'slack_contact_name' => 'Kim',
+            'slack_contact_member_id' => ' u0partner01 ',
+        ])
+        ->assertHasNoActionErrors()
+        ->assertNotified('Contact saved and invited to #acme-affiliate');
+
+    expect($affiliate->refresh())
+        ->slack_contact_name->toBe('Kim')
+        ->slack_contact_member_id->toBe('U0PARTNER01');
+});
+
+it('rejects a slack contact id that is not a member id', function () {
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->create([
+        'slack_channel_id' => 'C123',
+        'slack_channel_name' => 'acme-affiliate',
+    ]));
+
+    Livewire::test(AffiliateSlackChannels::class)
+        ->callAction(TestAction::make('editContact')->table($affiliate), data: ['slack_contact_member_id' => 'C0CHANNEL01'])
+        ->assertHasActionErrors(['slack_contact_member_id' => 'regex']);
 });

@@ -4,14 +4,15 @@ namespace App\Filament\Pages;
 
 use App\Enums\AffiliatePaymentMethod;
 use App\Enums\AffiliateStatus;
+use App\Enums\EmailTemplateType;
 use App\Enums\Integration;
-use App\Enums\MollieExportStatus;
+use App\Enums\InvoiceLanguage;
 use App\Filament\Resources\Affiliates\AffiliateResource;
+use App\Filament\Resources\EmailTemplates\EmailTemplateResource;
 use App\Models\Affiliate;
-use App\Models\AppSetting;
-use App\Models\User;
+use App\Models\EmailTemplate;
+use App\Services\AffiliateMollieSync;
 use App\Services\IntegrationErrorLogger;
-use App\Services\MollieInvoicingCustomersExport;
 use App\Services\MollieSalesInvoices;
 use App\Support\InvoiceAddressFormat;
 use App\Support\InvoiceVat;
@@ -19,12 +20,10 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\EmbeddedTable;
-use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
@@ -37,55 +36,41 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\HtmlString;
 use Mollie\Api\Types\PaymentTerm;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 use UnitEnum;
 
-class InvoiceSettings extends Page implements HasTable
+/**
+ * Invoicing affiliates: who can be invoiced, their Mollie customer and last invoice, and "Generate invoice".
+ */
+class AffiliateInvoices extends Page implements HasTable
 {
     use InteractsWithTable;
 
-    protected static string|UnitEnum|null $navigationGroup = 'System';
+    protected static string|UnitEnum|null $navigationGroup = 'Affiliates';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 2;
 
-    protected static ?string $title = 'Invoice settings';
+    protected static ?string $title = 'Invoices';
+
+    protected static ?string $slug = 'invoices';
 
     /**
-     * @var array{create_invoices_via_api: bool}
+     * The email template option for writing a custom email for one invoice.
      */
-    public array $settings = ['create_invoices_via_api' => false];
-
-    public function mount(): void
-    {
-        $this->settings['create_invoices_via_api'] = $this->createsInvoicesViaApi();
-    }
+    private const CustomEmail = 'custom';
 
     public function content(Schema $schema): Schema
     {
         return $schema
             ->components([
-                Section::make('Settings')
-                    ->compact()
-                    ->schema([
-                        Toggle::make('settings.create_invoices_via_api')
-                            ->label(fn (): Htmlable => $this->comingSoonLabel('Create invoices via the Mollie API'))
-                            ->helperText(fn (): string => $this->canManageSettings()
-                                ? 'On: "Generate invoice" creates and emails the invoice from here. Off: it opens Mollie Invoicing → Facturen to create it there.'
-                                : 'Only '.User::InvoiceSettingsManagerEmail.' can change this.')
-                            ->disabled(fn (): bool => ! $this->canManageSettings())
-                            ->live()
-                            ->afterStateUpdated(fn (bool $state) => $this->saveCreateInvoicesViaApi($state)),
-                    ]),
                 Tabs::make('Invoice providers')
                     ->tabs([
                         Tab::make('Mollie')
                             ->icon(Heroicon::OutlinedCreditCard)
-                            ->badge(fn (): ?int => $this->notInMollieAffiliates()->count() ?: null)
+                            ->badge(fn (): ?int => $this->invoicedAffiliatesQuery()->whereNull('mollie_customer_id')->count() ?: null)
                             ->badgeColor('warning')
                             ->schema([
                                 EmbeddedTable::make(),
@@ -98,7 +83,7 @@ class InvoiceSettings extends Page implements HasTable
     {
         return $table
             ->heading('Affiliates paid by invoice')
-            ->description(fn (): string => $this->mollieReminder())
+            ->description(fn (): string => $this->tableDescription())
             ->query(fn (): Builder => $this->invoicedAffiliatesQuery()->with('latestInvoice'))
             ->defaultSort('name')
             ->recordUrl(fn (Affiliate $record): string => AffiliateResource::getUrl('view', ['record' => $record]))
@@ -119,18 +104,20 @@ class InvoiceSettings extends Page implements HasTable
                     ->label('Country')
                     ->formatStateUsing(fn (string $state): ?string => InvoiceAddressFormat::countryName($state))
                     ->placeholder('-'),
-                TextColumn::make('mollie_export_status')
-                    ->label('In Mollie')
-                    ->state(fn (Affiliate $record): MollieExportStatus => $record->mollieExportStatus())
-                    ->formatStateUsing(fn (MollieExportStatus $state, Affiliate $record): string => $state === MollieExportStatus::Exported
-                        ? 'Exported '.$record->mollie_exported_at->translatedFormat('j M Y')
-                        : $state->getLabel())
+                TextColumn::make('mollie_customer_id')
+                    ->label('Mollie customer')
+                    ->formatStateUsing(fn (): string => 'In Mollie')
                     ->badge()
-                    ->tooltip(fn (Affiliate $record): ?string => match ($record->mollieExportStatus()) {
-                        MollieExportStatus::NotExported => 'Included in the next "Export for Mollie".',
-                        MollieExportStatus::ChangedSinceExport => 'Invoice details changed after the export. Update this customer in Mollie Invoicing → Klanten, then click "Updated in Mollie".',
-                        MollieExportStatus::Exported => null,
-                    }),
+                    ->color('success')
+                    ->icon(Heroicon::OutlinedCheckCircle)
+                    ->description(fn (Affiliate $record): ?string => $record->mollie_customer_id)
+                    ->copyable()
+                    ->copyableState(fn (Affiliate $record): ?string => $record->mollie_customer_id)
+                    ->copyMessage('Mollie customer ID copied')
+                    ->placeholder('Not in Mollie yet')
+                    ->tooltip(fn (Affiliate $record): string => filled($record->mollie_customer_id)
+                        ? 'Click to copy the Mollie customer ID.'
+                        : ($this->missingDetailsTooltip($record) ?? 'Click "Add to Mollie" to create the customer now.')),
                 TextColumn::make('invoice_details_status')
                     ->label('Invoice details')
                     ->state(fn (Affiliate $record): string => $record->hasCompleteInvoiceDetails() ? 'Complete' : 'Incomplete')
@@ -145,33 +132,42 @@ class InvoiceSettings extends Page implements HasTable
                     ->placeholder('-'),
             ])
             ->headerActions([
-                $this->exportForMollieAction(),
-                $this->generateInvoiceAction()
-                    ->tooltip(fn (): ?string => $this->createsInvoicesViaApi() ? null : 'Opens Mollie Invoicing → Facturen. Click "Aanmaken" there, pick the customer and the "Affiliate commissie" product, and enter the price.'),
+                $this->generateInvoiceAction(),
             ])
             ->recordActions([
-                Action::make('markUpdatedInMollie')
-                    ->label('Updated in Mollie')
-                    ->icon(Heroicon::OutlinedCheck)
-                    ->color('warning')
+                Action::make('addToMollie')
+                    ->label('Add to Mollie')
+                    ->icon(Heroicon::OutlinedUserPlus)
+                    ->color('gray')
                     ->link()
-                    ->visible(fn (Affiliate $record): bool => $record->mollieExportStatus() === MollieExportStatus::ChangedSinceExport)
-                    ->requiresConfirmation()
-                    ->modalDescription(fn (Affiliate $record): string => "Confirm that {$record->name}'s new invoice details are updated in Mollie Invoicing → Klanten.")
-                    ->action(function (Affiliate $record, MollieInvoicingCustomersExport $export): void {
-                        $export->markAsExported(collect([$record]));
+                    ->visible(fn (Affiliate $record): bool => blank($record->mollie_customer_id) && $record->hasCompleteInvoiceDetails())
+                    ->action(function (Affiliate $record, AffiliateMollieSync $sync, IntegrationErrorLogger $errorLogger): void {
+                        try {
+                            $customerId = $sync->ensureCustomer($record);
+                        } catch (Throwable $exception) {
+                            $errorLogger->record(Integration::Mollie, 'Create customer', $exception, $record);
+
+                            Notification::make()
+                                ->danger()
+                                ->title("Could not add {$record->name} to Mollie")
+                                ->body(IntegrationErrorLogger::readableMessage($exception))
+                                ->persistent()
+                                ->send();
+
+                            return;
+                        }
 
                         Notification::make()
                             ->success()
-                            ->title("{$record->name} is up to date in Mollie")
+                            ->title("{$record->name} is now in Mollie")
+                            ->body("Mollie customer ID: {$customerId}")
                             ->send();
                     }),
                 $this->generateInvoiceAction('generateInvoiceForAffiliate')
                     ->link()
                     ->disabled(fn (Affiliate $record): bool => $this->whyNotInvoiceable($record) !== null)
                     ->color(fn (Affiliate $record): string => $this->whyNotInvoiceable($record) === null ? 'primary' : 'gray')
-                    ->tooltip(fn (Affiliate $record): ?string => $this->whyNotInvoiceable($record)
-                        ?? ($this->createsInvoicesViaApi() ? null : "Opens Mollie Invoicing → Facturen. Click \"Aanmaken\" and pick {$record->invoice_company_name}."))
+                    ->tooltip(fn (Affiliate $record): ?string => $this->whyNotInvoiceable($record))
                     ->fillForm(fn (Affiliate $record): array => $this->defaultInvoiceData($record)),
             ])
             ->emptyStateIcon(Heroicon::OutlinedDocumentText)
@@ -228,71 +224,12 @@ class InvoiceSettings extends Page implements HasTable
         return $affiliate->hasCompleteInvoiceDetails() ? null : 'invoice details incomplete';
     }
 
-    /**
-     * Download the partners with complete invoice details as a CSV for Mollie Invoicing → Klanten → Uploaden.
-     */
-    protected function exportForMollieAction(): Action
+    protected function tableDescription(): string
     {
-        return Action::make('exportForMollie')
-            ->label(fn (): string => ($count = $this->notInMollieAffiliates()->count()) > 0 ? "Export for Mollie ({$count})" : 'Export for Mollie')
-            ->icon(Heroicon::OutlinedArrowDownTray)
-            ->color('gray')
-            ->tooltip('CSV of partners that are not in Mollie yet, for Invoicing → Klanten → Uploaden.')
-            ->action(function (MollieInvoicingCustomersExport $export): ?StreamedResponse {
-                $affiliates = $this->notInMollieAffiliates();
+        $notInMollie = $this->invoicedAffiliatesQuery()->whereNull('mollie_customer_id')->count();
 
-                if ($affiliates->isEmpty()) {
-                    Notification::make()
-                        ->info()
-                        ->title('Nothing new to export')
-                        ->body('Every partner with complete invoice details has already been exported.')
-                        ->send();
-
-                    return null;
-                }
-
-                $csv = $export->toCsv($affiliates);
-                $export->markAsExported($affiliates);
-
-                Notification::make()
-                    ->success()
-                    ->title(trans_choice('{1} Exported 1 partner for Mollie|[2,*] Exported :count partners for Mollie', $affiliates->count()))
-                    ->body('Upload the file in Mollie Invoicing → Klanten → Uploaden.')
-                    ->send();
-
-                return response()->streamDownload(fn () => print ($csv), 'mollie-customers-'.now()->toDateString().'.csv', [
-                    'Content-Type' => 'text/csv; charset=UTF-8',
-                ]);
-            });
-    }
-
-    /**
-     * Partners with complete invoice details that have never been exported to Mollie.
-     *
-     * @return Collection<int, Affiliate>
-     */
-    protected function notInMollieAffiliates(): Collection
-    {
-        return $this->invoiceableAffiliatesQuery()
-            ->whereNull('mollie_export_fingerprint')
-            ->orderBy('name')
-            ->get();
-    }
-
-    protected function mollieReminder(): string
-    {
-        $invoiceable = $this->invoiceableAffiliatesQuery()->get();
-        $notExported = $invoiceable->filter(fn (Affiliate $affiliate): bool => $affiliate->mollieExportStatus() === MollieExportStatus::NotExported)->count();
-        $changed = $invoiceable->filter(fn (Affiliate $affiliate): bool => $affiliate->mollieExportStatus() === MollieExportStatus::ChangedSinceExport)->count();
-
-        $messages = array_filter([
-            $notExported > 0 ? trans_choice('{1} 1 partner is not in Mollie yet: click "Export for Mollie" and upload the file in Invoicing → Klanten.|[2,*] :count partners are not in Mollie yet: click "Export for Mollie" and upload the file in Invoicing → Klanten.', $notExported) : null,
-            $changed > 0 ? trans_choice('{1} 1 partner changed since the export: update it in Mollie by hand.|[2,*] :count partners changed since the export: update them in Mollie by hand.', $changed) : null,
-        ]);
-
-        return $messages
-            ? implode(' ', $messages)
-            : 'Active affiliates with payment method "Invoice". Everyone with complete invoice details is in Mollie.';
+        return 'Active affiliates with payment method "Invoice". Partners with complete invoice details get a Mollie customer automatically, and "Generate invoice" creates and emails the invoice through Mollie.'
+            .($notInMollie > 0 ? ' '.trans_choice('{1} 1 partner is not in Mollie yet.|[2,*] :count partners are not in Mollie yet.', $notInMollie) : '');
     }
 
     protected function generateInvoiceAction(string $name = 'generateInvoice'): Action
@@ -300,7 +237,6 @@ class InvoiceSettings extends Page implements HasTable
         return Action::make($name)
             ->label('Generate invoice')
             ->icon(Heroicon::OutlinedDocumentPlus)
-            ->url(fn (): ?string => $this->createsInvoicesViaApi() ? null : $this->mollieInvoicesUrl(), shouldOpenInNewTab: true)
             ->modalHeading('Generate invoice')
             ->modalDescription('Mollie creates the invoice in Invoicing → Facturen and emails it, with a payment link, to the partner\'s invoice email address.')
             ->modalSubmitActionLabel('Create and send invoice')
@@ -322,7 +258,13 @@ class InvoiceSettings extends Page implements HasTable
                     ->searchable()
                     ->required()
                     ->live()
-                    ->afterStateUpdated(fn (Get $get, Set $set) => $set('description', $this->defaultDescription($get('affiliate_id'), $get('period')))),
+                    ->afterStateUpdated(function (Get $get, Set $set): void {
+                        $set('description', $this->defaultDescription($get('affiliate_id'), $get('period')));
+
+                        if ($get('email_template') !== self::CustomEmail) {
+                            $set('email_template', $this->defaultEmailTemplateId($get('affiliate_id')));
+                        }
+                    }),
                 Select::make('period')
                     ->label('Invoice period')
                     ->options(fn (): array => $this->periodOptions())
@@ -352,6 +294,39 @@ class InvoiceSettings extends Page implements HasTable
                     ])
                     ->selectablePlaceholder(false)
                     ->required(),
+                Select::make('email_template')
+                    ->label('Email template')
+                    ->options(fn (): array => $this->emailTemplateOptions())
+                    ->helperText(fn (Get $get): ?string => $this->emailTemplateHint($get('affiliate_id')))
+                    ->selectablePlaceholder(false)
+                    ->required()
+                    ->live()
+                    ->afterStateUpdated(function (?string $state, Get $get, Set $set): void {
+                        if ($state === self::CustomEmail) {
+                            $email = $this->renderEmail($get('affiliate_id'), $get('period'), $this->defaultEmailTemplateId($get('affiliate_id')));
+                            $set('email_subject', $email['subject'] ?? '');
+                            $set('email_body', $email['body'] ?? '');
+                        }
+                    }),
+                TextEntry::make('email_preview')
+                    ->label('Email')
+                    ->state(fn (Get $get): ?Htmlable => ($email = $this->renderEmail($get('affiliate_id'), $get('period'), $get('email_template')))
+                        ? $this->emailPreview($email)
+                        : null)
+                    ->placeholder('Pick an affiliate to see the email.')
+                    ->visible(fn (Get $get): bool => $get('email_template') !== self::CustomEmail),
+                TextInput::make('email_subject')
+                    ->label('Email subject')
+                    ->required()
+                    ->maxLength(255)
+                    ->visible(fn (Get $get): bool => $get('email_template') === self::CustomEmail),
+                Textarea::make('email_body')
+                    ->label('Email text')
+                    ->rows(8)
+                    ->required()
+                    ->maxLength(5000)
+                    ->helperText(EmailTemplateResource::placeholderHelp(EmailTemplateType::MollieInvoice))
+                    ->visible(fn (Get $get): bool => $get('email_template') === self::CustomEmail),
                 TextEntry::make('invoice_summary')
                     ->label('Invoice')
                     ->state(fn (Get $get): ?array => $this->invoiceSummary($get('affiliate_id'), $get('amount')))
@@ -363,13 +338,23 @@ class InvoiceSettings extends Page implements HasTable
 
                 abort_if($this->whyNotInvoiceable($affiliate) !== null, 422);
 
+                $period = Carbon::parse($data['period']);
+                $email = $data['email_template'] === self::CustomEmail
+                    ? [
+                        'subject' => EmailTemplate::fillPlaceholders($data['email_subject'], $affiliate, $period, $this->languageOf($affiliate)),
+                        'body' => EmailTemplate::fillPlaceholders($data['email_body'], $affiliate, $period, $this->languageOf($affiliate)),
+                    ]
+                    : EmailTemplate::findOrFail($data['email_template'])->renderFor($affiliate, $period);
+
                 try {
                     $invoice = $invoices->issue(
                         $affiliate,
-                        Carbon::parse($data['period']),
+                        $period,
                         (string) $data['amount'],
                         $data['description'],
                         $data['payment_term'],
+                        $email['subject'],
+                        $email['body'],
                         auth()->user(),
                     );
                 } catch (Throwable $exception) {
@@ -391,75 +376,6 @@ class InvoiceSettings extends Page implements HasTable
                     ->body("{$affiliate->name} · {$invoice->description} · € ".number_format((float) ($invoice->total_amount ?? $invoice->amount), 2, ',', '.').' incl. VAT')
                     ->send();
             });
-    }
-
-    /**
-     * Whether "Generate invoice" creates the invoice through the Mollie API (otherwise it opens the Mollie dashboard).
-     */
-    protected function createsInvoicesViaApi(): bool
-    {
-        return (bool) AppSetting::value(AppSetting::CreateInvoicesViaMollieApi, config('services.mollie.create_invoices_via_api'));
-    }
-
-    /**
-     * A label with a lock icon and a "Coming soon" badge, for features that are not available yet.
-     */
-    protected function comingSoonLabel(string $label): Htmlable
-    {
-        $lock = svg('heroicon-m-lock-closed', '', ['style' => 'width: 1rem; height: 1rem; color: rgb(156 163 175); flex-shrink: 0;'])->toHtml();
-        $sparkles = svg('heroicon-m-sparkles', '', ['style' => 'width: 0.75rem; height: 0.75rem;'])->toHtml();
-
-        return new HtmlString(
-            '<span style="display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">'
-                .$lock
-                .'<span>'.e($label).'</span>'
-                .'<span style="display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.125rem 0.625rem; border-radius: 9999px;'
-                .' font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #fff;'
-                .' background: linear-gradient(135deg, #f59e0b 0%, #f97316 55%, #ec4899 100%);'
-                .' box-shadow: 0 1px 2px rgb(0 0 0 / 0.15), 0 0 0 1px rgb(255 255 255 / 0.15) inset;">'
-                .$sparkles.'Coming soon'
-                .'</span>'
-            .'</span>'
-        );
-    }
-
-    protected function canManageSettings(): bool
-    {
-        return (bool) auth()->user()?->canManageInvoiceSettings();
-    }
-
-    protected function saveCreateInvoicesViaApi(bool $enabled): void
-    {
-        if (! $this->canManageSettings()) {
-            $this->settings['create_invoices_via_api'] = $this->createsInvoicesViaApi();
-
-            Notification::make()
-                ->danger()
-                ->title('Only '.User::InvoiceSettingsManagerEmail.' can change this setting')
-                ->send();
-
-            return;
-        }
-
-        AppSetting::put(AppSetting::CreateInvoicesViaMollieApi, $enabled, auth()->user());
-
-        Notification::make()
-            ->success()
-            ->title($enabled ? 'Invoices are now created via the Mollie API' : 'Invoices are now created in the Mollie dashboard')
-            ->body($enabled ? '"Generate invoice" opens the form and sends the invoice from here.' : '"Generate invoice" opens Mollie Invoicing → Facturen.')
-            ->send();
-    }
-
-    /**
-     * Mollie Invoicing → Facturen in the dashboard, where "Aanmaken" creates a new invoice.
-     */
-    protected function mollieInvoicesUrl(): string
-    {
-        $organizationId = config('services.mollie.organization_id');
-
-        return $organizationId
-            ? "https://my.mollie.com/dashboard/{$organizationId}/invoice-ar/invoices"
-            : 'https://my.mollie.com/dashboard';
     }
 
     /**
@@ -500,7 +416,7 @@ class InvoiceSettings extends Page implements HasTable
     }
 
     /**
-     * @return array{affiliate_id: ?int, period: string, amount: null, description: string, payment_term: string}
+     * @return array{affiliate_id: ?int, period: string, amount: null, description: string, payment_term: string, email_template: ?string}
      */
     protected function defaultInvoiceData(?Affiliate $affiliate = null): array
     {
@@ -512,7 +428,91 @@ class InvoiceSettings extends Page implements HasTable
             'amount' => null,
             'description' => $this->defaultDescription($affiliate?->getKey(), $period),
             'payment_term' => PaymentTerm::DAYS_30,
+            'email_template' => $this->defaultEmailTemplateId($affiliate?->getKey()),
         ];
+    }
+
+    /**
+     * The Mollie invoice email templates to choose from, plus writing a custom email.
+     *
+     * @return array<string, array<string, string>>
+     */
+    protected function emailTemplateOptions(): array
+    {
+        return EmailTemplate::query()
+            ->where('type', EmailTemplateType::MollieInvoice)
+            ->orderByDesc('is_default')
+            ->orderBy('name')
+            ->get()
+            ->groupBy(fn (EmailTemplate $template): string => $template->language->getLabel())
+            ->map(fn ($templates): array => $templates->mapWithKeys(fn (EmailTemplate $template): array => [(string) $template->getKey() => $template->name])->all())
+            ->put('Other', [self::CustomEmail => 'Custom – write the email for this invoice'])
+            ->all();
+    }
+
+    /**
+     * The default Mollie invoice template in the affiliate's language.
+     */
+    protected function defaultEmailTemplateId(mixed $affiliateId): ?string
+    {
+        $affiliate = filled($affiliateId) ? Affiliate::find($affiliateId) : null;
+        $template = EmailTemplate::defaultFor(EmailTemplateType::MollieInvoice, $affiliate ? $this->languageOf($affiliate) : InvoiceLanguage::Dutch);
+
+        return $template ? (string) $template->getKey() : null;
+    }
+
+    /**
+     * A template's subject and body filled in for the affiliate and period.
+     *
+     * @return array{subject: string, body: string}|null
+     */
+    protected function renderEmail(mixed $affiliateId, ?string $period, mixed $templateId): ?array
+    {
+        $affiliate = filled($affiliateId) ? Affiliate::find($affiliateId) : null;
+        $template = filled($templateId) && $templateId !== self::CustomEmail ? EmailTemplate::find($templateId) : null;
+
+        if (! $affiliate || ! $template) {
+            return null;
+        }
+
+        return $template->renderFor($affiliate, $period ? Carbon::parse($period) : now()->subMonthNoOverflow());
+    }
+
+    /**
+     * Explains which template language was picked for the affiliate, and why.
+     */
+    protected function emailTemplateHint(mixed $affiliateId): ?string
+    {
+        $affiliate = filled($affiliateId) ? Affiliate::find($affiliateId) : null;
+
+        if (! $affiliate) {
+            return 'The default template in the partner\'s preferred language is picked automatically.';
+        }
+
+        $language = $this->languageOf($affiliate)->getLabel();
+        $reason = $affiliate->invoice_language ? "preferred language ({$language})" : "country ({$language})";
+
+        return "Picked automatically from {$affiliate->name}'s {$reason}. Choose another template or Custom to change the email.";
+    }
+
+    /**
+     * The email as it will be sent: the subject in bold and the body with its line breaks and blank lines.
+     *
+     * @param  array{subject: string, body: string}  $email
+     */
+    protected function emailPreview(array $email): Htmlable
+    {
+        return new HtmlString(
+            '<div style="border: 1px solid rgb(127 127 127 / 0.25); border-radius: 0.5rem; padding: 0.75rem 1rem;">'
+                .'<div style="font-weight: 600; padding-bottom: 0.5rem; margin-bottom: 0.5rem; border-bottom: 1px solid rgb(127 127 127 / 0.2);">'.e($email['subject']).'</div>'
+                .'<div style="white-space: pre-line;">'.e($email['body']).'</div>'
+            .'</div>'
+        );
+    }
+
+    protected function languageOf(Affiliate $affiliate): InvoiceLanguage
+    {
+        return $affiliate->invoice_language ?? InvoiceLanguage::suggestedFor($affiliate->invoice_country);
     }
 
     protected function defaultDescription(mixed $affiliateId, ?string $period): string

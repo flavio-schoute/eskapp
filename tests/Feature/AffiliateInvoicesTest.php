@@ -3,17 +3,14 @@
 use App\Enums\AffiliatePaymentMethod;
 use App\Enums\Integration;
 use App\Enums\InvoiceLanguage;
-use App\Enums\MollieExportStatus;
-use App\Filament\Pages\InvoiceSettings;
+use App\Filament\Pages\AffiliateInvoices;
 use App\Filament\Resources\Affiliates\Pages\CreateAffiliate;
 use App\Filament\Resources\Affiliates\Pages\EditAffiliate;
 use App\Filament\Resources\Affiliates\Pages\ViewAffiliate;
 use App\Models\Affiliate;
 use App\Models\AffiliateInvoice;
-use App\Models\AppSetting;
 use App\Models\IntegrationError;
 use App\Models\User;
-use App\Services\MollieInvoicingCustomersExport;
 use App\Support\InvoiceVat;
 use Filament\Actions\Action;
 use Filament\Actions\Testing\TestAction;
@@ -34,10 +31,6 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->travelTo('2026-10-07 12:00');
-    config([
-        'services.mollie.create_invoices_via_api' => true,
-        'services.mollie.organization_id' => 'org_19111288',
-    ]);
 
     Http::preventStrayRequests();
     config([
@@ -55,7 +48,7 @@ it('lists only active affiliates that are paid by invoice', function () {
     $onHold = Affiliate::factory()->onHold()->create(['payment_method' => AffiliatePaymentMethod::Invoice]);
     $pipeline = Affiliate::factory()->pipeline()->create(['payment_method' => AffiliatePaymentMethod::Invoice]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->assertOk()
         ->assertCanSeeTableRecords([$invoiced])
         ->assertCanNotSeeTableRecords([$automatic, $other, $onHold, $pipeline]);
@@ -65,15 +58,15 @@ it('shows whether the invoice details are complete', function () {
     $complete = Affiliate::factory()->withInvoiceDetails()->create();
     $incomplete = Affiliate::factory()->withInvoiceDetails()->create(['invoice_city' => null]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->assertTableColumnStateSet('invoice_details_status', 'Complete', $complete)
         ->assertTableColumnStateSet('invoice_details_status', 'Incomplete', $incomplete);
 });
 
-it('is listed under the system menu', function () {
-    get(InvoiceSettings::getUrl())
+it('is listed as invoices under the affiliates menu', function () {
+    get(AffiliateInvoices::getUrl())
         ->assertOk()
-        ->assertSeeInOrder(['System', 'Invoice settings', 'Integration errors'])
+        ->assertSeeInOrder(['Affiliates', 'All affiliates', 'Invoices', 'System', 'Email templates', 'Slack settings', 'Integration errors'])
         ->assertSee('Mollie');
 });
 
@@ -90,7 +83,7 @@ it('creates and sends the invoice in mollie and keeps a record of it', function 
         ]),
     ]);
 
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create([
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->create([
         'name' => 'Acme',
         'invoice_company_name' => 'Acme B.V.',
         'invoice_contact_person' => 'Jan',
@@ -99,7 +92,7 @@ it('creates and sends the invoice in mollie and keeps a record of it', function 
         'invoice_language' => InvoiceLanguage::Dutch,
     ]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->callAction(TestAction::make('generateInvoice')->table(), data: [
             'affiliate_id' => $affiliate->getKey(),
             'period' => '2026-09-01',
@@ -144,13 +137,13 @@ it('creates and sends the invoice in mollie and keeps a record of it', function 
 });
 
 it('shows the vat and total before sending', function () {
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create([
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->create([
         'invoice_company_name' => 'Acme B.V.',
         'invoice_email' => 'billing@acme.test',
         'invoice_country' => 'NL',
     ]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->mountAction(TestAction::make('generateInvoice')->table())
         ->fillForm(['affiliate_id' => $affiliate->getKey(), 'amount' => '100'])
         ->assertSchemaStateSet(['invoice_summary' => [
@@ -166,9 +159,9 @@ it('does not send anything and logs the error when mollie refuses the invoice', 
     Mollie::fake([
         CreateSalesInvoiceRequest::class => MockResponse::error(500, 'Internal Server Error', 'Something went wrong'),
     ]);
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create(['name' => 'Acme']);
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Acme']);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->callAction(TestAction::make('generateInvoice')->table(), data: [
             'affiliate_id' => $affiliate->getKey(),
             'period' => '2026-09-01',
@@ -212,18 +205,18 @@ it('writes the reverse charge note in dutch for dutch speaking partners', functi
 });
 
 it('shows the last invoice per partner', function () {
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->create();
     AffiliateInvoice::factory()->for($affiliate)->create(['invoice_number' => 'INV-0001', 'created_at' => now()->subMonth()]);
     AffiliateInvoice::factory()->for($affiliate)->create(['invoice_number' => 'INV-0002']);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->assertTableColumnFormattedStateSet('latestInvoice.invoice_number', 'INV-0002 · '.now()->translatedFormat('j M Y'), $affiliate);
 });
 
 it('prefills the affiliate when generating from its row', function () {
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->create();
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->mountAction(TestAction::make('generateInvoiceForAffiliate')->table($affiliate))
         ->assertSchemaStateSet([
             'affiliate_id' => $affiliate->getKey(),
@@ -232,9 +225,9 @@ it('prefills the affiliate when generating from its row', function () {
 });
 
 it('requires an affiliate, period and positive amount to generate an invoice', function () {
-    Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
+    Affiliate::factory()->withInvoiceDetails()->create();
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->callAction(TestAction::make('generateInvoice')->table(), data: [
             'affiliate_id' => null,
             'period' => null,
@@ -244,13 +237,13 @@ it('requires an affiliate, period and positive amount to generate an invoice', f
 });
 
 it('disables generating an invoice for an affiliate with incomplete invoice details', function () {
-    $complete = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
+    $complete = Affiliate::factory()->withInvoiceDetails()->create();
     $incomplete = Affiliate::factory()->create([
         'payment_method' => AffiliatePaymentMethod::Invoice,
         'invoice_company_name' => 'Acme B.V.',
     ]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($complete))
         ->assertActionDisabled(TestAction::make('generateInvoiceForAffiliate')->table($incomplete))
         ->assertActionExists(
@@ -262,17 +255,17 @@ it('disables generating an invoice for an affiliate with incomplete invoice deta
 it('keeps the generate invoice button available when no affiliate is complete yet', function () {
     Affiliate::factory()->create(['payment_method' => AffiliatePaymentMethod::Invoice]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->assertActionEnabled(TestAction::make('generateInvoice')->table())
         ->mountAction(TestAction::make('generateInvoice')->table())
         ->assertActionMounted(TestAction::make('generateInvoice')->table());
 });
 
 it('lists incomplete affiliates as unavailable in the generate invoice form', function () {
-    $complete = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create(['name' => 'Complete Partner']);
+    $complete = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Complete Partner']);
     $incomplete = Affiliate::factory()->create(['name' => 'Incomplete Partner', 'payment_method' => AffiliatePaymentMethod::Invoice]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->mountAction(TestAction::make('generateInvoice')->table())
         ->assertFormFieldExists('affiliate_id', function (Select $field) use ($complete, $incomplete): bool {
             return $field->getOptions() === [
@@ -285,10 +278,10 @@ it('lists incomplete affiliates as unavailable in the generate invoice form', fu
 });
 
 it('does not generate an invoice for an affiliate with incomplete invoice details', function () {
-    Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
+    Affiliate::factory()->withInvoiceDetails()->create();
     $incomplete = Affiliate::factory()->create(['payment_method' => AffiliatePaymentMethod::Invoice]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->callAction(TestAction::make('generateInvoice')->table(), data: [
             'affiliate_id' => $incomplete->getKey(),
             'period' => '2026-09-01',
@@ -336,105 +329,12 @@ it('hides invoice details on the view page for automatic payouts', function () {
         ->assertSee('Visible Person');
 });
 
-it('exports partners with complete invoice details in mollie\'s customer import format', function () {
-    $this->travelTo('2026-10-07 12:00');
-
-    Affiliate::factory()->withInvoiceDetails()->create([
-        'name' => 'DayOne',
-        'invoice_company_name' => 'DAYONE FULFILLMENT CO.,LTD',
-        'invoice_kvk_number' => '91330211MA2H1234X',
-        'invoice_email' => 'billing@dayone.test',
-        'invoice_phone' => '+86 574 1234 5678',
-        'invoice_address_line_1' => 'Rm808 Block A Zhongguanxilu 1277#',
-        'invoice_address_line_2' => null,
-        'invoice_postal_code' => '315201',
-        'invoice_city' => 'Ningbo',
-        'invoice_region' => 'Zhenhaiqu',
-        'invoice_country' => 'CN',
-        'invoice_language' => InvoiceLanguage::English,
-    ]);
-    Affiliate::factory()->withInvoiceDetails()->create(['invoice_city' => null]);
-    Affiliate::factory()->withInvoiceDetails()->create(['payment_method' => AffiliatePaymentMethod::Automatic]);
-
-    $expectedCsv = implode("\n", [
-        'type,company_name,company_number,first_name,last_name,email,phone_number,postal_code,street_name_and_number,address_line_2,city,country_code,preferred_language',
-        'company,"DAYONE FULFILLMENT CO.,LTD",91330211MA2H1234X,,,billing@dayone.test,"+86 574 1234 5678",315201,"Rm808 Block A Zhongguanxilu 1277#",Zhenhaiqu,Ningbo,cn,en',
-    ])."\n";
-
-    Livewire::test(InvoiceSettings::class)
-        ->callAction(TestAction::make('exportForMollie')->table())
-        ->assertFileDownloaded('mollie-customers-2026-10-07.csv', $expectedCsv)
-        ->assertNotified('Exported 1 partner for Mollie');
-});
-
-it('only exports partners that are not in mollie yet and remembers the export', function () {
-    $exported = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Already Exported']);
-    app(MollieInvoicingCustomersExport::class)->markAsExported(collect([$exported]));
-    $new = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'New Partner']);
-
-    Livewire::test(InvoiceSettings::class)
-        ->assertActionExists(TestAction::make('exportForMollie')->table(), fn (Action $action): bool => $action->getLabel() === 'Export for Mollie (1)')
-        ->callAction(TestAction::make('exportForMollie')->table())
-        ->assertFileDownloaded(content: app(MollieInvoicingCustomersExport::class)->toCsv(collect([$new])));
-
-    expect($new->refresh()->mollieExportStatus())->toBe(MollieExportStatus::Exported)
-        ->and($new->mollie_exported_at)->not->toBeNull();
-
-    Livewire::test(InvoiceSettings::class)
-        ->callAction(TestAction::make('exportForMollie')->table())
-        ->assertNoFileDownloaded()
-        ->assertNotified('Nothing new to export');
-});
-
-it('reminds how many partners are not in mollie yet', function () {
-    Affiliate::factory()->withInvoiceDetails()->count(2)->create();
-    $exported = Affiliate::factory()->withInvoiceDetails()->create();
-    app(MollieInvoicingCustomersExport::class)->markAsExported(collect([$exported]));
-
-    Livewire::test(InvoiceSettings::class)
-        ->assertSee('2 partners are not in Mollie yet')
-        ->assertTableColumnFormattedStateSet('mollie_export_status', 'Exported '.now()->translatedFormat('j M Y'), $exported);
-});
-
-it('flags partners whose invoice details changed after the export until they are updated in mollie', function () {
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Acme']);
-    app(MollieInvoicingCustomersExport::class)->markAsExported(collect([$affiliate]));
-
-    $affiliate->update(['invoice_email' => 'new-billing@acme.test']);
-
-    expect($affiliate->refresh()->mollieExportStatus())->toBe(MollieExportStatus::ChangedSinceExport);
-
-    Livewire::test(InvoiceSettings::class)
-        ->assertSee('1 partner changed since the export')
-        ->assertActionVisible(TestAction::make('markUpdatedInMollie')->table($affiliate))
-        ->callAction(TestAction::make('markUpdatedInMollie')->table($affiliate))
-        ->assertNotified('Acme is up to date in Mollie');
-
-    expect($affiliate->refresh()->mollieExportStatus())->toBe(MollieExportStatus::Exported);
-});
-
-it('uses the same columns as mollie\'s customer import template', function () {
-    expect(MollieInvoicingCustomersExport::Columns)->toBe([
-        'type', 'company_name', 'company_number', 'first_name', 'last_name', 'email', 'phone_number',
-        'postal_code', 'street_name_and_number', 'address_line_2', 'city', 'country_code', 'preferred_language',
-    ]);
-});
-
-it('does not download an empty export', function () {
-    Affiliate::factory()->create(['payment_method' => AffiliatePaymentMethod::Invoice]);
-
-    Livewire::test(InvoiceSettings::class)
-        ->callAction(TestAction::make('exportForMollie')->table())
-        ->assertNoFileDownloaded()
-        ->assertNotified('Nothing new to export');
-});
-
-it('allows generating an invoice for every partner with complete details, also before the mollie export', function () {
-    $exported = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create(['name' => 'Exported']);
+it('allows generating an invoice for every partner with complete invoice details', function () {
+    $exported = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Exported']);
     $notExported = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Not Exported']);
     $incomplete = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Incomplete', 'invoice_city' => null]);
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($exported))
         ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($notExported))
         ->assertActionDisabled(TestAction::make('generateInvoiceForAffiliate')->table($incomplete))
@@ -449,34 +349,10 @@ it('allows generating an invoice for every partner with complete details, also b
                 && $field->isOptionDisabled($incomplete->getKey(), 'Incomplete (invoice details incomplete)');
         });
 });
-it('generates an invoice for a partner that was not exported to mollie yet', function () {
-    config(['mollie.key' => 'access_'.str_repeat('a', 30)]);
-    Mollie::fake([
-        CreateCustomerRequest::class => MockResponse::created(['resource' => 'customer', 'id' => 'cst_test']),
-        CreateSalesInvoiceRequest::class => MockResponse::created([
-            'resource' => 'sales-invoice',
-            'id' => 'invoice_test',
-            'invoiceNumber' => 'INV-0001',
-            'status' => 'issued',
-        ]),
-    ]);
-    $notExported = Affiliate::factory()->withInvoiceDetails()->create(['invoice_email' => 'billing@acme.test']);
-
-    Livewire::test(InvoiceSettings::class)
-        ->callAction(TestAction::make('generateInvoice')->table(), data: [
-            'affiliate_id' => $notExported->getKey(),
-            'period' => '2026-09-01',
-            'amount' => '100',
-            'description' => 'Affiliate commissie – september 2026',
-            'payment_term' => '30 days',
-        ])
-        ->assertHasNoActionErrors()
-        ->assertNotified('Invoice INV-0001 sent to billing@acme.test');
-});
 it('lets you pick a month instead of a date for the invoice period', function () {
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->create();
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->mountAction(TestAction::make('generateInvoiceForAffiliate')->table($affiliate))
         ->assertSchemaStateSet(['period' => '2026-09-01'])
         ->assertFormFieldExists('period', function (Select $field): bool {
@@ -492,75 +368,38 @@ it('lets you pick a month instead of a date for the invoice period', function ()
 
 it('adds the new month to the invoice periods when it starts', function () {
     $this->travelTo('2026-11-01 08:00');
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->create();
 
-    Livewire::test(InvoiceSettings::class)
+    Livewire::test(AffiliateInvoices::class)
         ->mountAction(TestAction::make('generateInvoiceForAffiliate')->table($affiliate))
         ->assertSchemaStateSet(['period' => '2026-10-01'])
         ->assertFormFieldExists('period', fn (Select $field): bool => array_key_first($field->getOptions()) === '2026-11-01'
             && array_key_last($field->getOptions()) === '2026-05-01');
 });
 
-it('opens mollie invoicing to create the invoice there while the api is switched off', function () {
-    config(['services.mollie.create_invoices_via_api' => false]);
-    $inMollie = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create(['invoice_company_name' => 'Acme B.V.']);
-    $notInMollie = Affiliate::factory()->withInvoiceDetails()->create();
+it('shows whether a partner is in mollie with its customer id', function () {
+    $inMollie = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create(['mollie_customer_id' => 'cst_8wmqcHMN4U']));
+    $notInMollie = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create(['mollie_customer_id' => null]));
 
-    Livewire::test(InvoiceSettings::class)
-        ->assertActionHasUrl(TestAction::make('generateInvoice')->table(), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices')
-        ->assertActionShouldOpenUrlInNewTab(TestAction::make('generateInvoice')->table())
-        ->assertActionHasUrl(TestAction::make('generateInvoiceForAffiliate')->table($inMollie), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices')
-        ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($inMollie))
-        ->assertActionExists(
-            TestAction::make('generateInvoiceForAffiliate')->table($inMollie),
-            fn (Action $action): bool => $action->getTooltip() === 'Opens Mollie Invoicing → Facturen. Click "Aanmaken" and pick Acme B.V..',
-        )
-        ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($notInMollie));
+    Livewire::test(AffiliateInvoices::class)
+        ->assertTableColumnFormattedStateSet('mollie_customer_id', 'In Mollie', $inMollie)
+        ->assertTableColumnHasDescription('mollie_customer_id', 'cst_8wmqcHMN4U', $inMollie)
+        ->assertTableColumnStateNotSet('mollie_customer_id', 'cst_8wmqcHMN4U', $notInMollie)
+        ->assertSee('1 partner is not in Mollie yet.');
 });
 
-it('opens the generate invoice form when invoices are created through the api', function () {
-    Livewire::test(InvoiceSettings::class)
-        ->assertActionDoesNotHaveUrl(TestAction::make('generateInvoice')->table(), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices');
+it('adds a complete partner that is not in mollie yet to mollie', function () {
+    config(['mollie.key' => 'live_'.str_repeat('a', 30)]);
+    Mollie::fake([
+        CreateCustomerRequest::class => MockResponse::created(['resource' => 'customer', 'id' => 'cst_new']),
+    ]);
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Acme', 'mollie_customer_id' => null]));
+    $incomplete = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create(['invoice_kvk_number' => null]));
+
+    Livewire::test(AffiliateInvoices::class)
+        ->assertActionHidden(TestAction::make('addToMollie')->table($incomplete))
+        ->callAction(TestAction::make('addToMollie')->table($affiliate))
+        ->assertNotified('Acme is now in Mollie');
+
+    expect($affiliate->refresh()->mollie_customer_id)->toBe('cst_new');
 });
-
-it('lets flavio switch creating invoices via the mollie api on and off', function () {
-    config(['services.mollie.create_invoices_via_api' => false]);
-    actingAs(User::factory()->create(['email' => 'flavio@e-skool.nl']));
-
-    Livewire::test(InvoiceSettings::class)
-        ->assertFormFieldEnabled('settings.create_invoices_via_api')
-        ->assertActionHasUrl(TestAction::make('generateInvoice')->table(), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices')
-        ->set('settings.create_invoices_via_api', true)
-        ->assertNotified('Invoices are now created via the Mollie API')
-        ->assertActionDoesNotHaveUrl(TestAction::make('generateInvoice')->table(), 'https://my.mollie.com/dashboard/org_19111288/invoice-ar/invoices');
-
-    expect(AppSetting::value(AppSetting::CreateInvoicesViaMollieApi))->toBeTrue();
-
-    Livewire::test(InvoiceSettings::class)
-        ->assertSet('settings.create_invoices_via_api', true)
-        ->set('settings.create_invoices_via_api', false)
-        ->assertNotified('Invoices are now created in the Mollie dashboard');
-
-    expect(AppSetting::value(AppSetting::CreateInvoicesViaMollieApi))->toBeFalse();
-});
-
-it('does not let anyone else change the mollie api setting', function () {
-    config(['services.mollie.create_invoices_via_api' => false]);
-    actingAs(User::factory()->create(['email' => 'gairo@e-skool.nl']));
-
-    Livewire::test(InvoiceSettings::class)
-        ->assertFormFieldDisabled('settings.create_invoices_via_api')
-        ->assertSee('Only flavio@e-skool.nl can change this.')
-        ->assertSee('Coming soon')
-        ->set('settings.create_invoices_via_api', true)
-        ->assertSet('settings.create_invoices_via_api', false);
-
-    expect(AppSetting::value(AppSetting::CreateInvoicesViaMollieApi))->toBeNull();
-});
-
-it('uses the env setting until the toggle has been saved', function (bool $envValue) {
-    config(['services.mollie.create_invoices_via_api' => $envValue]);
-
-    Livewire::test(InvoiceSettings::class)
-        ->assertSet('settings.create_invoices_via_api', $envValue);
-})->with([true, false]);

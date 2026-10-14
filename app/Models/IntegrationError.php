@@ -59,4 +59,31 @@ class IntegrationError extends Model
     {
         return $this->resolved_at !== null;
     }
+
+    /**
+     * The error without the request body and timestamp prefix that some services add, for lists.
+     */
+    public function summary(): string
+    {
+        $summary = trim(explode(' Request body:', $this->message, 2)[0]);
+
+        return trim(preg_replace('/^\[[^\]]+\]\s*/', '', $summary));
+    }
+
+    /**
+     * The request body included in the error message, pretty-printed when it is JSON.
+     */
+    public function requestBody(): ?string
+    {
+        if (! str_contains($this->message, ' Request body:')) {
+            return null;
+        }
+
+        $body = trim(explode(' Request body:', $this->message, 2)[1]);
+        $json = json_decode($body, true);
+
+        return is_array($json)
+            ? json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            : $body;
+    }
 }

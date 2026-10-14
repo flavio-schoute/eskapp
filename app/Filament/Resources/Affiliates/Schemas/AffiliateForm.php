@@ -6,6 +6,7 @@ use App\Enums\AffiliatePaymentMethod;
 use App\Enums\AffiliateStatus;
 use App\Enums\AffiliateType;
 use App\Enums\InvoiceLanguage;
+use App\Filament\Resources\SlackMembers\SlackMemberResource;
 use App\Models\Affiliate;
 use App\Support\InvoiceAddressFormat;
 use Filament\Forms\Components\FileUpload;
@@ -17,6 +18,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 
 class AffiliateForm
 {
@@ -48,6 +50,14 @@ class AffiliateForm
                             ->helperText(fn (?Affiliate $record): string => filled($record?->slack_channel_id) ? 'Private channel' : 'Created as a private channel when you save')
                             ->color('primary')
                             ->placeholder('Fill in the partner name'),
+                        TextInput::make('slack_contact_name')
+                            ->label('Slack contact person')
+                            ->placeholder('Name of the partner\'s contact in Slack')
+                            ->maxLength(255)
+                            ->columnSpan(2),
+                        SlackMemberResource::memberIdField('slack_contact_member_id')
+                            ->helperText('Invited to the partner\'s Slack channel automatically. In Slack: profile → ⋮ (more) → Copy member ID.')
+                            ->columnSpan(2),
                     ]),
                 Section::make('Access')
                     ->columns(3)
@@ -174,6 +184,18 @@ class AffiliateForm
                             ->maxLength(255)
                             ->live(debounce: 400)
                             ->hidden(fn (Get $get): bool => in_array($get('invoice_country'), [null, 'NL', 'BE', 'DE', 'FR', 'LU', 'AT'], true)),
+                        TextEntry::make('mollie_customer_id')
+                            ->label('Mollie customer')
+                            ->formatStateUsing(fn (string $state): string => "In Mollie · {$state}")
+                            ->badge()
+                            ->color('success')
+                            ->icon(Heroicon::OutlinedCheckCircle)
+                            ->copyable()
+                            ->copyableState(fn (?Affiliate $record): ?string => $record?->mollie_customer_id)
+                            ->copyMessage('Mollie customer ID copied')
+                            ->placeholder('Not in Mollie yet: created automatically when you save with complete invoice details.')
+                            ->visibleOn('edit')
+                            ->columnSpanFull(),
                         TextEntry::make('invoice_address_preview')
                             ->label('Address as it appears on an invoice')
                             ->state(fn (Get $get): array => InvoiceAddressFormat::lines([

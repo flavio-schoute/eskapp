@@ -35,7 +35,23 @@ class AffiliateSlackSync
 
         $this->slack->inviteUsers($channel['id'], SlackMember::active()->pluck('slack_user_id')->all());
 
+        $this->inviteContact($affiliate);
+
         return $channel['id'];
+    }
+
+    /**
+     * Invite the affiliate's own Slack contact to its channel.
+     */
+    public function inviteContact(Affiliate $affiliate): void
+    {
+        if (blank($affiliate->slack_channel_id) || blank($affiliate->slack_contact_member_id)) {
+            return;
+        }
+
+        $this->guardConfigured();
+
+        $this->slack->inviteUsers($affiliate->slack_channel_id, [$affiliate->slack_contact_member_id], skipUsersThatCannotBeInvited: false);
     }
 
     /**
