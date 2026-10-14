@@ -39,6 +39,11 @@ return [
         'key' => env('MOLLIE_KEY'),
     ],
 
+    'vies' => [
+        // Check EU VAT numbers with the European Commission's VIES service when saving an affiliate.
+        'enabled' => (bool) env('VIES_VALIDATION', true),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

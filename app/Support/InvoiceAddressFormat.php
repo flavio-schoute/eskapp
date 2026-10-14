@@ -148,4 +148,47 @@ class InvoiceAddressFormat
             default => '+ country code and number',
         };
     }
+
+    /**
+     * An example VAT number in the notation partners in that country are used to.
+     */
+    public static function vatNumberPlaceholder(?string $countryCode): string
+    {
+        return match ($countryCode) {
+            'NL' => 'NL123456789B01',
+            'BE' => 'BE 0123.456.789',
+            'DE' => 'DE123456789',
+            'FR' => 'FR12345678901',
+            'AT' => 'ATU12345678',
+            'ES' => 'ESX1234567X',
+            'IT' => 'IT12345678901',
+            'LU' => 'LU12345678',
+            'IE' => 'IE1234567WA',
+            'PT' => 'PT123456789',
+            'PL' => 'PL1234567890',
+            'DK' => 'DK12345678',
+            'SE' => 'SE123456789701',
+            'FI' => 'FI12345678',
+            'GR' => 'EL123456789',
+            default => 'Country code + number',
+        };
+    }
+
+    public static function registrationNumberLabel(?string $countryCode): string
+    {
+        return match ($countryCode) {
+            'NL' => 'KvK number',
+            'BE' => 'Enterprise number (KBO)',
+            default => 'Company registration number',
+        };
+    }
+
+    public static function registrationNumberPlaceholder(?string $countryCode): ?string
+    {
+        return match ($countryCode) {
+            'NL' => '12345678',
+            'BE' => '0123.456.789',
+            default => null,
+        };
+    }
 }

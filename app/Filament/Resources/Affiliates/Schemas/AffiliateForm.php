@@ -8,12 +8,17 @@ use App\Enums\AffiliateType;
 use App\Enums\InvoiceLanguage;
 use App\Filament\Resources\SlackMembers\SlackMemberResource;
 use App\Models\Affiliate;
+use App\Services\ViesVatValidator;
 use App\Support\InvoiceAddressFormat;
+use App\Support\ViesAddress;
+use Closure;
+use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -124,8 +129,8 @@ class AffiliateForm
                             ->label('Contact person')
                             ->maxLength(255),
                         TextInput::make('invoice_kvk_number')
-                            ->label(fn (Get $get): string => $get('invoice_country') === 'NL' ? 'KvK number' : 'Company registration number')
-                            ->placeholder(fn (Get $get): ?string => $get('invoice_country') === 'NL' ? '12345678' : null)
+                            ->label(fn (Get $get): string => InvoiceAddressFormat::registrationNumberLabel($get('invoice_country')))
+                            ->placeholder(fn (Get $get): ?string => InvoiceAddressFormat::registrationNumberPlaceholder($get('invoice_country')))
                             ->regex(fn (Get $get): string => $get('invoice_country') === 'NL' ? '/^\s*(\d\s*){8}$/' : '/^[\p{L}\p{N} .\-\/]{2,20}$/u')
                             ->validationMessages(['regex' => 'A KvK number has 8 digits; other registration numbers are at most 20 letters or digits.'])
                             ->dehydrateStateUsing(fn (?string $state, Get $get): ?string => blank($state) ? null : ($get('invoice_country') === 'NL' ? preg_replace('/\s+/', '', $state) : trim($state)))
@@ -133,10 +138,67 @@ class AffiliateForm
                             ->helperText('Required: Mollie needs it for business invoices.'),
                         TextInput::make('invoice_vat_number')
                             ->label(fn (Get $get): string => $get('invoice_country') === 'NL' ? 'VAT number (BTW)' : 'VAT number')
-                            ->placeholder(fn (Get $get): string => $get('invoice_country') === 'NL' ? 'NL123456789B01' : 'Country code + number')
-                            ->regex('/^\s*[A-Za-z]{2}[A-Za-z0-9 .+*]{2,16}\s*$/')
+                            ->placeholder(fn (Get $get): string => InvoiceAddressFormat::vatNumberPlaceholder($get('invoice_country')))
+                            ->helperText('Dots, spaces and dashes are fine (e.g. BE 0123.456.789); it is saved as BE0123456789. EU numbers are checked with VIES.')
+                            ->regex('/^\s*[A-Za-z]{2}[A-Za-z0-9 .+*\-]{2,20}\s*$/')
                             ->validationMessages(['regex' => 'A VAT number starts with the 2-letter country code, e.g. NL123456789B01.'])
-                            ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? strtoupper(preg_replace('/[\s.]+/', '', $state)) : null),
+                            ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                $vies = app(ViesVatValidator::class);
+
+                                if (blank($value) || ! $vies->isEnabled() || ! ViesVatValidator::isEuVatNumber((string) $value)) {
+                                    return;
+                                }
+
+                                if ($vies->check((string) $value)['status'] === ViesVatValidator::Invalid) {
+                                    $fail('VIES says this VAT number is not valid or not active. Check the number with the partner.');
+                                }
+                            })
+                            ->suffixAction(
+                                Action::make('checkVatNumber')
+                                    ->label('Check with VIES')
+                                    ->icon(Heroicon::OutlinedShieldCheck)
+                                    ->tooltip('Check with VIES')
+                                    ->action(function (?string $state, Get $get, Set $set): void {
+                                        if (blank($state)) {
+                                            return;
+                                        }
+
+                                        $result = app(ViesVatValidator::class)->check($state);
+                                        $vatNumber = ViesVatValidator::normalize($state);
+
+                                        if ($result['status'] === ViesVatValidator::Valid) {
+                                            $filled = static::fillFromVies($vatNumber, $result, $get, $set);
+
+                                            Notification::make()
+                                                ->success()
+                                                ->title("{$vatNumber} is valid")
+                                                ->body(collect([
+                                                    collect([$result['name'], $result['address'] ? str_replace("\n", ', ', $result['address']) : null])->filter()->implode(' · '),
+                                                    $filled ? 'Filled in: '.implode(', ', $filled).'.' : null,
+                                                ])->filter()->implode("\n") ?: null)
+                                                ->send();
+
+                                            return;
+                                        }
+
+                                        match ($result['status']) {
+                                            ViesVatValidator::Invalid => Notification::make()
+                                                ->danger()
+                                                ->title("{$vatNumber} is not valid according to VIES")
+                                                ->send(),
+                                            ViesVatValidator::NotEu => Notification::make()
+                                                ->info()
+                                                ->title('VIES only checks EU VAT numbers')
+                                                ->send(),
+                                            default => Notification::make()
+                                                ->warning()
+                                                ->title('VIES is not available right now')
+                                                ->body('The VAT number could not be checked; try again later.')
+                                                ->send(),
+                                        };
+                                    })
+                            )
+                            ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? ViesVatValidator::normalize($state) : null),
                         TextInput::make('invoice_email')
                             ->label('Email address')
                             ->email()
@@ -230,5 +292,43 @@ class AffiliateForm
                             ->rows(2),
                     ]),
             ]);
+    }
+
+    /**
+     * Fill the empty invoice fields with the company and address VIES registered for the VAT number.
+     *
+     * @param  array{status: string, name: ?string, address: ?string}  $result
+     * @return list<string> The labels of the fields that were filled in.
+     */
+    public static function fillFromVies(string $vatNumber, array $result, Get $get, Set $set): array
+    {
+        $country = ViesAddress::countryFromVatNumber($vatNumber);
+        $address = $result['address'] ? ViesAddress::parse($result['address'], (string) ($get('invoice_country') ?: $country)) : [];
+
+        $values = [
+            'invoice_company_name' => ['Company name', $result['name'] ? ViesAddress::companyName($result['name']) : null],
+            'invoice_address_line_1' => ['Street and house number', $address['street'] ?? null],
+            'invoice_address_line_2' => ['Address line 2', $address['street_additional'] ?? null],
+            'invoice_postal_code' => ['Postal code', $address['postal_code'] ?? null],
+            'invoice_city' => ['City', $address['city'] ?? null],
+            'invoice_country' => ['Country', $country],
+        ];
+
+        $filled = [];
+
+        foreach ($values as $field => [$label, $value]) {
+            if (blank($value) || filled($get($field))) {
+                continue;
+            }
+
+            $set($field, $value);
+            $filled[] = $label;
+
+            if ($field === 'invoice_country') {
+                $set('invoice_language', InvoiceLanguage::suggestedFor($value)->value);
+            }
+        }
+
+        return $filled;
     }
 }
