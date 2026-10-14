@@ -26,10 +26,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Http::preventStrayRequests();
-    config([
-        'mollie.key' => 'test_'.str_repeat('a', 30),
-        'services.mollie.sync_customers' => true,
-    ]);
+    config(['mollie.key' => 'test_'.str_repeat('a', 30)]);
 
     actingAs(User::factory()->create());
 });
@@ -102,16 +99,6 @@ it('creates a mollie customer with all invoice details when an invoiced affiliat
                 'region' => 'Zhenhaiqu',
             ];
     });
-});
-
-it('does not create mollie customers while the customer sync is switched off', function () {
-    config(['services.mollie.sync_customers' => false]);
-    fakeMollieCustomers();
-
-    $affiliate = Affiliate::factory()->withInvoiceDetails()->create();
-
-    expect($affiliate->refresh()->mollie_customer_id)->toBeNull();
-    Mollie::assertSentCount(0);
 });
 
 it('does not create a mollie customer for automatic payouts', function () {

@@ -148,6 +148,7 @@ class Affiliate extends Model
     {
         return array_keys(array_filter([
             'company name' => blank($this->invoice_company_name),
+            'KvK number' => blank($this->invoice_kvk_number),
             'email address' => blank($this->invoice_email),
             'street and house number' => blank($this->invoice_address_line_1),
             'postal code' => blank($this->invoice_postal_code),

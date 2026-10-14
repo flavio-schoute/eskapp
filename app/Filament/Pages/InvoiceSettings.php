@@ -196,6 +196,7 @@ class InvoiceSettings extends Page implements HasTable
     {
         return $this->invoicedAffiliatesQuery()
             ->whereNotNull('invoice_company_name')->where('invoice_company_name', '!=', '')
+            ->whereNotNull('invoice_kvk_number')->where('invoice_kvk_number', '!=', '')
             ->whereNotNull('invoice_address_line_1')->where('invoice_address_line_1', '!=', '')
             ->whereNotNull('invoice_postal_code')->where('invoice_postal_code', '!=', '')
             ->whereNotNull('invoice_city')->where('invoice_city', '!=', '')
@@ -212,19 +213,11 @@ class InvoiceSettings extends Page implements HasTable
 
     /**
      * Why an invoice cannot be generated for the affiliate yet, or null when it can: its invoice details must be
-     * complete and it must be in Mollie Invoicing → Klanten with its current details.
+     * complete. The Sales Invoices API sends the full customer details with every invoice.
      */
     protected function whyNotInvoiceable(Affiliate $affiliate): ?string
     {
-        if ($missing = $this->missingDetailsTooltip($affiliate)) {
-            return $missing;
-        }
-
-        return match ($affiliate->mollieExportStatus()) {
-            MollieExportStatus::NotExported => 'Not in Mollie yet: click "Export for Mollie" and upload the file in Invoicing → Klanten first.',
-            MollieExportStatus::ChangedSinceExport => 'Invoice details changed since the export: update this customer in Mollie, then click "Updated in Mollie".',
-            MollieExportStatus::Exported => null,
-        };
+        return $this->missingDetailsTooltip($affiliate);
     }
 
     /**
@@ -232,15 +225,7 @@ class InvoiceSettings extends Page implements HasTable
      */
     protected function shortReasonNotInvoiceable(Affiliate $affiliate): ?string
     {
-        if (! $affiliate->hasCompleteInvoiceDetails()) {
-            return 'invoice details incomplete';
-        }
-
-        return match ($affiliate->mollieExportStatus()) {
-            MollieExportStatus::NotExported => 'not in Mollie yet',
-            MollieExportStatus::ChangedSinceExport => 'changed since export',
-            MollieExportStatus::Exported => null,
-        };
+        return $affiliate->hasCompleteInvoiceDetails() ? null : 'invoice details incomplete';
     }
 
     /**
@@ -333,7 +318,7 @@ class InvoiceSettings extends Page implements HasTable
                         ])
                         ->all())
                     ->disableOptionWhen(fn (string $value): bool => ($affiliate = $this->invoicedAffiliatesQuery()->find($value)) === null || $this->whyNotInvoiceable($affiliate) !== null)
-                    ->helperText('Greyed-out affiliates need complete invoice details and must be in Mollie first.')
+                    ->helperText('Greyed-out affiliates need complete invoice details first.')
                     ->searchable()
                     ->required()
                     ->live()

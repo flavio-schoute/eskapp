@@ -114,7 +114,9 @@ class AffiliateForm
                             ->placeholder(fn (Get $get): ?string => $get('invoice_country') === 'NL' ? '12345678' : null)
                             ->regex(fn (Get $get): string => $get('invoice_country') === 'NL' ? '/^\s*(\d\s*){8}$/' : '/^[\p{L}\p{N} .\-\/]{2,20}$/u')
                             ->validationMessages(['regex' => 'A KvK number has 8 digits; other registration numbers are at most 20 letters or digits.'])
-                            ->dehydrateStateUsing(fn (?string $state, Get $get): ?string => blank($state) ? null : ($get('invoice_country') === 'NL' ? preg_replace('/\s+/', '', $state) : trim($state))),
+                            ->dehydrateStateUsing(fn (?string $state, Get $get): ?string => blank($state) ? null : ($get('invoice_country') === 'NL' ? preg_replace('/\s+/', '', $state) : trim($state)))
+                            ->required()
+                            ->helperText('Required: Mollie needs it for business invoices.'),
                         TextInput::make('invoice_vat_number')
                             ->label(fn (Get $get): string => $get('invoice_country') === 'NL' ? 'VAT number (BTW)' : 'VAT number')
                             ->placeholder(fn (Get $get): string => $get('invoice_country') === 'NL' ? 'NL123456789B01' : 'Country code + number')

@@ -31,13 +31,11 @@ class AffiliateMollieSync
     public function __construct(public MollieCustomers $customers) {}
 
     /**
-     * Whether the affiliate should have a Mollie customer: the sync is switched on, the affiliate is invoiced
-     * and its invoice details are complete.
+     * Whether the affiliate should have a Mollie customer: it is invoiced and its invoice details are complete.
      */
     public function shouldSync(Affiliate $affiliate): bool
     {
-        return config('services.mollie.sync_customers')
-            && (bool) $affiliate->payment_method?->requiresInvoiceDetails()
+        return (bool) $affiliate->payment_method?->requiresInvoiceDetails()
             && $affiliate->hasCompleteInvoiceDetails();
     }
 

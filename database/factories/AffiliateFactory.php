@@ -41,6 +41,7 @@ class AffiliateFactory extends Factory
         return $this->state(fn (array $attributes): array => [
             'payment_method' => AffiliatePaymentMethod::Invoice,
             'invoice_company_name' => fake()->company(),
+            'invoice_kvk_number' => fake()->numerify('########'),
             'invoice_address_line_1' => fake()->streetAddress(),
             'invoice_postal_code' => fake()->postcode(),
             'invoice_city' => fake()->city(),

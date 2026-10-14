@@ -206,6 +206,7 @@ it('saves optional invoice details and shows the formatted address', function ()
             'password' => 'secret',
             'payment_method' => AffiliatePaymentMethod::Invoice->value,
             'invoice_company_name' => 'DAYONE FULFILLMENT CO.,LTD',
+            'invoice_kvk_number' => '91330211MA2H1234X',
             'invoice_address_line_1' => 'Rm808 Block A Zhongguanxilu 1277#',
             'invoice_postal_code' => '315201',
             'invoice_city' => 'Ningbo',
@@ -262,6 +263,7 @@ it('requires the main invoice details when the affiliate is paid by invoice', fu
         ->call('create')
         ->assertHasFormErrors([
             'invoice_company_name' => 'required',
+            'invoice_kvk_number' => 'required',
             'invoice_email' => 'required',
             'invoice_address_line_1' => 'required',
             'invoice_postal_code' => 'required',

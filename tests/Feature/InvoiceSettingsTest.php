@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 use Mollie\Api\Fake\MockResponse;
 use Mollie\Api\Http\PendingRequest;
+use Mollie\Api\Http\Requests\CreateCustomerRequest;
 use Mollie\Api\Http\Requests\CreateSalesInvoiceRequest;
 use Mollie\Laravel\Facades\Mollie;
 
@@ -178,7 +179,7 @@ it('does not send anything and logs the error when mollie refuses the invoice', 
         ->assertNotified('Could not create the invoice for Acme');
 
     expect(AffiliateInvoice::count())->toBe(0)
-        ->and(IntegrationError::where('integration', Integration::Mollie)->sole()->action)->toBe('Generate invoice');
+        ->and(IntegrationError::where('integration', Integration::Mollie)->where('action', 'Generate invoice')->count())->toBe(1);
 });
 
 it('uses the partner\'s country for the vat on the invoice', function (string $country, ?string $vatNumber, string $rate, ?string $notePart) {
@@ -254,7 +255,7 @@ it('disables generating an invoice for an affiliate with incomplete invoice deta
         ->assertActionDisabled(TestAction::make('generateInvoiceForAffiliate')->table($incomplete))
         ->assertActionExists(
             TestAction::make('generateInvoiceForAffiliate')->table($incomplete),
-            fn (Action $action): bool => $action->getTooltip() === 'Add the email address, street and house number, postal code, city and country to the invoice details first.',
+            fn (Action $action): bool => $action->getTooltip() === 'Add the KvK number, email address, street and house number, postal code, city and country to the invoice details first.',
         );
 });
 
@@ -428,47 +429,50 @@ it('does not download an empty export', function () {
         ->assertNotified('Nothing new to export');
 });
 
-it('only allows generating an invoice for partners that are in mollie with their current details', function () {
-    $inMollie = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create(['name' => 'In Mollie']);
-    $notInMollie = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Not In Mollie']);
-    $changed = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create(['name' => 'Changed']);
-    $changed->update(['invoice_email' => 'new-billing@changed.test']);
+it('allows generating an invoice for every partner with complete details, also before the mollie export', function () {
+    $exported = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create(['name' => 'Exported']);
+    $notExported = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Not Exported']);
+    $incomplete = Affiliate::factory()->withInvoiceDetails()->create(['name' => 'Incomplete', 'invoice_city' => null]);
 
     Livewire::test(InvoiceSettings::class)
-        ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($inMollie))
-        ->assertActionDisabled(TestAction::make('generateInvoiceForAffiliate')->table($notInMollie))
-        ->assertActionExists(
-            TestAction::make('generateInvoiceForAffiliate')->table($notInMollie),
-            fn (Action $action): bool => $action->getTooltip() === 'Not in Mollie yet: click "Export for Mollie" and upload the file in Invoicing → Klanten first.',
-        )
-        ->assertActionDisabled(TestAction::make('generateInvoiceForAffiliate')->table($changed))
+        ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($exported))
+        ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($notExported))
+        ->assertActionDisabled(TestAction::make('generateInvoiceForAffiliate')->table($incomplete))
         ->mountAction(TestAction::make('generateInvoice')->table())
-        ->assertFormFieldExists('affiliate_id', function (Select $field) use ($inMollie, $notInMollie, $changed): bool {
+        ->assertFormFieldExists('affiliate_id', function (Select $field) use ($exported, $notExported, $incomplete): bool {
             return $field->getOptions() === [
-                $changed->getKey() => 'Changed (changed since export)',
-                $inMollie->getKey() => 'In Mollie',
-                $notInMollie->getKey() => 'Not In Mollie (not in Mollie yet)',
+                $exported->getKey() => 'Exported',
+                $incomplete->getKey() => 'Incomplete (invoice details incomplete)',
+                $notExported->getKey() => 'Not Exported',
             ]
-                && ! $field->isOptionDisabled($inMollie->getKey(), 'In Mollie')
-                && $field->isOptionDisabled($notInMollie->getKey(), 'Not In Mollie (not in Mollie yet)')
-                && $field->isOptionDisabled($changed->getKey(), 'Changed (changed since export)');
+                && ! $field->isOptionDisabled($notExported->getKey(), 'Not Exported')
+                && $field->isOptionDisabled($incomplete->getKey(), 'Incomplete (invoice details incomplete)');
         });
 });
-
-it('does not generate an invoice for a partner that is not in mollie yet', function () {
-    Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
-    $notInMollie = Affiliate::factory()->withInvoiceDetails()->create();
+it('generates an invoice for a partner that was not exported to mollie yet', function () {
+    config(['mollie.key' => 'access_'.str_repeat('a', 30)]);
+    Mollie::fake([
+        CreateCustomerRequest::class => MockResponse::created(['resource' => 'customer', 'id' => 'cst_test']),
+        CreateSalesInvoiceRequest::class => MockResponse::created([
+            'resource' => 'sales-invoice',
+            'id' => 'invoice_test',
+            'invoiceNumber' => 'INV-0001',
+            'status' => 'issued',
+        ]),
+    ]);
+    $notExported = Affiliate::factory()->withInvoiceDetails()->create(['invoice_email' => 'billing@acme.test']);
 
     Livewire::test(InvoiceSettings::class)
         ->callAction(TestAction::make('generateInvoice')->table(), data: [
-            'affiliate_id' => $notInMollie->getKey(),
+            'affiliate_id' => $notExported->getKey(),
             'period' => '2026-09-01',
             'amount' => '100',
-            'description' => 'Affiliate commission September 2026',
+            'description' => 'Affiliate commissie – september 2026',
+            'payment_term' => '30 days',
         ])
-        ->assertHasActionErrors(['affiliate_id']);
+        ->assertHasNoActionErrors()
+        ->assertNotified('Invoice INV-0001 sent to billing@acme.test');
 });
-
 it('lets you pick a month instead of a date for the invoice period', function () {
     $affiliate = Affiliate::factory()->withInvoiceDetails()->exportedToMollie()->create();
 
@@ -511,7 +515,7 @@ it('opens mollie invoicing to create the invoice there while the api is switched
             TestAction::make('generateInvoiceForAffiliate')->table($inMollie),
             fn (Action $action): bool => $action->getTooltip() === 'Opens Mollie Invoicing → Facturen. Click "Aanmaken" and pick Acme B.V..',
         )
-        ->assertActionDisabled(TestAction::make('generateInvoiceForAffiliate')->table($notInMollie));
+        ->assertActionEnabled(TestAction::make('generateInvoiceForAffiliate')->table($notInMollie));
 });
 
 it('opens the generate invoice form when invoices are created through the api', function () {
