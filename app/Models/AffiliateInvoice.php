@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Database\Factories\AffiliateInvoiceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -28,6 +30,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class AffiliateInvoice extends Model
 {
+    /**
+     * Mollie statuses after which an invoice no longer changes, so it does not need to be checked again.
+     *
+     * @var list<string>
+     */
+    public const FinalStatuses = ['paid', 'cancelled', 'expired'];
+
     /** @use HasFactory<AffiliateInvoiceFactory> */
     use HasFactory;
 
@@ -72,11 +81,43 @@ class AffiliateInvoice extends Model
     }
 
     /**
-     * Days until the due date: negative when overdue, null when paid or without a due date.
+     * Whether the invoice is still waiting to be paid (issued, payment pending or overdue).
+     */
+    public function isAwaitingPayment(): bool
+    {
+        return in_array($this->status, ['issued', 'issuing', 'pending-payment', 'overdue'], true);
+    }
+
+    /**
+     * Invoices whose status can still change at Mollie.
+     *
+     * @param  Builder<AffiliateInvoice>  $query
+     */
+    #[Scope]
+    protected function notFinal(Builder $query): void
+    {
+        $query->whereNotIn('status', self::FinalStatuses);
+    }
+
+    /**
+     * Unpaid invoices past their due date.
+     *
+     * @param  Builder<AffiliateInvoice>  $query
+     */
+    #[Scope]
+    protected function overdue(Builder $query): void
+    {
+        $query->whereIn('status', ['issued', 'issuing', 'pending-payment', 'overdue'])
+            ->whereNotNull('due_at')
+            ->where('due_at', '<', now()->startOfDay());
+    }
+
+    /**
+     * Days until the due date: negative when overdue, null when not awaiting payment or without a due date.
      */
     public function daysUntilDue(): ?int
     {
-        if ($this->isPaid() || ! $this->due_at) {
+        if (! $this->isAwaitingPayment() || ! $this->due_at) {
             return null;
         }
 

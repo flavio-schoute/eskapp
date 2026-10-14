@@ -54,6 +54,13 @@ class MollieSalesInvoices
             emailDetails: new EmailDetails($emailSubject, $emailBody),
         );
 
+        $salesInvoiceRequest->payload()->add('metadata', [
+            'affiliate_id' => $affiliate->getKey(),
+            'affiliate' => $affiliate->name,
+            'period' => $period->format('Y-m'),
+            'created_by' => $creator?->email,
+        ]);
+
         $invoice = Mollie::send($salesInvoiceRequest);
 
         return AffiliateInvoice::create([
@@ -75,7 +82,7 @@ class MollieSalesInvoices
     }
 
     /**
-     * Fetch the invoice's current status from Mollie, and remember when it was first seen as paid.
+     * Fetch the invoice's current status from Mollie, with the payment date Mollie reports (paidAt).
      */
     public function refreshStatus(AffiliateInvoice $invoice): AffiliateInvoice
     {
@@ -85,7 +92,9 @@ class MollieSalesInvoices
             'status' => $salesInvoice->status,
             'invoice_number' => $salesInvoice->invoiceNumber ?? $invoice->invoice_number,
             'due_at' => $salesInvoice->dueAt ? Carbon::parse($salesInvoice->dueAt) : $invoice->due_at,
-            'paid_at' => $salesInvoice->status === SalesInvoiceStatus::PAID ? ($invoice->paid_at ?? now()) : null,
+            'paid_at' => $salesInvoice->status === SalesInvoiceStatus::PAID
+                ? (isset($salesInvoice->paidAt) ? Carbon::parse($salesInvoice->paidAt) : ($invoice->paid_at ?? now()))
+                : null,
             'status_checked_at' => now(),
         ]);
 

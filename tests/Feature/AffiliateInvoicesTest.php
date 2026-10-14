@@ -124,6 +124,12 @@ it('creates and sends the invoice in mollie and keeps a record of it', function 
             ]]
             && $sent['emailDetails']['subject'] === 'Factuur affiliate commissie september 2026'
             && str_starts_with($sent['emailDetails']['body'], 'Beste Jan,')
+            && $sent['metadata'] === [
+                'affiliate_id' => $affiliate->getKey(),
+                'affiliate' => 'Acme',
+                'period' => '2026-09',
+                'created_by' => auth()->user()->email,
+            ]
             && ! isset($sent['memo']);
     });
 
@@ -393,6 +399,10 @@ it('shows whether the last invoice is paid or when it is due', function (array $
     'due tomorrow' => [['status' => 'issued', 'due_at' => '2026-10-08'], 'Due tomorrow', 'warning', 'Due 8 Oct 2026'],
     'due today' => [['status' => 'issued', 'due_at' => '2026-10-07'], 'Due today', 'warning', 'Due 7 Oct 2026'],
     'overdue' => [['status' => 'issued', 'due_at' => '2026-10-04'], 'Overdue · 3 days', 'danger', 'Due 4 Oct 2026'],
+    'overdue according to mollie' => [['status' => 'overdue', 'due_at' => '2026-10-04'], 'Overdue · 3 days', 'danger', 'Due 4 Oct 2026'],
+    'cancelled' => [['status' => 'cancelled', 'due_at' => '2026-10-04'], 'Cancelled', 'gray', null],
+    'expired' => [['status' => 'expired', 'due_at' => '2026-10-04'], 'Expired', 'gray', null],
+    'payment reversed' => [['status' => 'payment_reversed', 'due_at' => '2026-10-04'], 'Payment reversed', 'danger', null],
 ]);
 
 it('counts the overdue invoices on the mollie tab', function () {
@@ -435,4 +445,22 @@ it('adds a complete partner that is not in mollie yet to mollie', function () {
         ->assertNotified('Acme is now in Mollie');
 
     expect($affiliate->refresh()->mollie_customer_id)->toBe('cst_new');
+});
+
+it('limits the invoice line to the 100 characters mollie allows', function () {
+    $affiliate = Affiliate::factory()->withInvoiceDetails()->create();
+
+    Livewire::test(AffiliateInvoices::class)
+        ->mountAction(TestAction::make('generateInvoiceForAffiliate')->table($affiliate))
+        ->fillForm(['amount' => '10', 'description' => str_repeat('a', 101)])
+        ->callMountedAction()
+        ->assertHasActionErrors(['description' => 'max']);
+});
+
+it('does not count cancelled invoices as overdue', function () {
+    $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->withInvoiceDetails()->create());
+    AffiliateInvoice::factory()->for($affiliate)->create(['status' => 'cancelled', 'due_at' => '2026-09-01']);
+    AffiliateInvoice::factory()->for($affiliate)->create(['status' => 'overdue', 'due_at' => '2026-09-01']);
+
+    expect(AffiliateInvoice::overdue()->count())->toBe(1);
 });

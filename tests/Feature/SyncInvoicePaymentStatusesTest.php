@@ -61,3 +61,32 @@ it('checks the payment status every hour', function () {
     expect($event)->not->toBeNull()
         ->and($event->expression)->toBe('0 * * * *');
 });
+
+it('uses the payment date mollie reports', function () {
+    Mollie::fake([
+        GetSalesInvoiceRequest::class => MockResponse::ok(['resource' => 'sales-invoice', 'id' => 'invoice_a', 'status' => 'paid', 'paidAt' => '2026-10-12T09:30:00+00:00']),
+    ]);
+    $invoice = openInvoice(['mollie_sales_invoice_id' => 'invoice_a']);
+
+    artisan('invoices:sync-payment-status')->assertSuccessful();
+
+    expect($invoice->refresh()->paid_at->toIso8601String())->toBe('2026-10-12T09:30:00+00:00');
+});
+
+it('stops checking invoices that were cancelled or expired', function () {
+    Mollie::fake([
+        GetSalesInvoiceRequest::class => MockResponse::ok(['resource' => 'sales-invoice', 'id' => 'invoice_a', 'status' => 'cancelled']),
+    ]);
+    $invoice = openInvoice(['mollie_sales_invoice_id' => 'invoice_a']);
+    openInvoice(['status' => 'expired']);
+
+    artisan('invoices:sync-payment-status')
+        ->expectsOutput('Checked 1 open invoices, 0 now paid.')
+        ->assertSuccessful();
+
+    expect($invoice->refresh()->status)->toBe('cancelled');
+
+    artisan('invoices:sync-payment-status')
+        ->expectsOutput('Checked 0 open invoices, 0 now paid.')
+        ->assertSuccessful();
+});

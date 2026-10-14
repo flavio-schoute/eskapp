@@ -12,12 +12,12 @@ use Illuminate\Console\Command;
 use Throwable;
 
 #[Signature('invoices:sync-payment-status')]
-#[Description('Check Mollie for the payment status of every open affiliate invoice')]
+#[Description('Check Mollie for the status of every affiliate invoice that can still change')]
 class SyncInvoicePaymentStatuses extends Command
 {
     public function handle(MollieSalesInvoices $invoices, IntegrationErrorLogger $errorLogger): int
     {
-        $openInvoices = AffiliateInvoice::query()->with('affiliate')->where('status', '!=', 'paid')->get();
+        $openInvoices = AffiliateInvoice::query()->with('affiliate')->notFinal()->get();
         $paid = 0;
 
         foreach ($openInvoices as $invoice) {

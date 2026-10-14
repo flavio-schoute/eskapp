@@ -125,10 +125,12 @@ class AffiliateInvoices extends Page implements HasTable
                     ->badge()
                     ->color(fn (Affiliate $record): string => $this->paymentColor($record->latestInvoice))
                     ->icon(fn (Affiliate $record): ?Heroicon => match (true) {
-                        $record->latestInvoice?->isPaid() => Heroicon::OutlinedCheckCircle,
-                        ($record->latestInvoice?->daysUntilDue() ?? 1) < 0 => Heroicon::OutlinedExclamationTriangle,
-                        $record->latestInvoice !== null => Heroicon::OutlinedClock,
-                        default => null,
+                        $record->latestInvoice === null => null,
+                        $record->latestInvoice->isPaid() => Heroicon::OutlinedCheckCircle,
+                        in_array($record->latestInvoice->status, ['failed', 'payment_reversed'], true) => Heroicon::OutlinedExclamationTriangle,
+                        ! $record->latestInvoice->isAwaitingPayment() => Heroicon::OutlinedXCircle,
+                        ($record->latestInvoice->daysUntilDue() ?? 1) < 0 => Heroicon::OutlinedExclamationTriangle,
+                        default => Heroicon::OutlinedClock,
                     })
                     ->description(fn (Affiliate $record): ?string => $record->latestInvoice ? $this->paymentDescription($record->latestInvoice) : null)
                     ->tooltip(fn (Affiliate $record): ?string => $record->latestInvoice?->status_checked_at
@@ -142,7 +144,7 @@ class AffiliateInvoices extends Page implements HasTable
                     ->icon(Heroicon::OutlinedArrowPath)
                     ->color('gray')
                     ->action(function (MollieSalesInvoices $invoices, IntegrationErrorLogger $errorLogger): void {
-                        $openInvoices = AffiliateInvoice::query()->with('affiliate')->where('status', '!=', 'paid')->get();
+                        $openInvoices = AffiliateInvoice::query()->with('affiliate')->notFinal()->get();
                         $failed = 0;
 
                         foreach ($openInvoices as $invoice) {
@@ -265,23 +267,29 @@ class AffiliateInvoices extends Page implements HasTable
      */
     protected function overdueInvoicesCount(): int
     {
-        return AffiliateInvoice::query()
-            ->where('status', '!=', 'paid')
-            ->whereNotNull('due_at')
-            ->where('due_at', '<', now()->startOfDay())
-            ->count();
+        return AffiliateInvoice::query()->overdue()->count();
     }
 
     protected function paymentLabel(AffiliateInvoice $invoice): string
     {
-        if ($invoice->isPaid()) {
-            return 'Paid';
+        $finalLabel = match ($invoice->status) {
+            'paid' => 'Paid',
+            'cancelled' => 'Cancelled',
+            'expired' => 'Expired',
+            'failed' => 'Failed',
+            'payment_reversed' => 'Payment reversed',
+            'draft' => 'Draft',
+            default => null,
+        };
+
+        if ($finalLabel !== null) {
+            return $finalLabel;
         }
 
         $days = $invoice->daysUntilDue();
 
         return match (true) {
-            $days === null => 'Open',
+            $days === null => $invoice->status === 'pending-payment' ? 'Payment pending' : 'Open',
             $days > 1 => "Due in {$days} days",
             $days === 1 => 'Due tomorrow',
             $days === 0 => 'Due today',
@@ -300,7 +308,9 @@ class AffiliateInvoices extends Page implements HasTable
 
         return match (true) {
             $invoice->isPaid() => 'success',
-            $days === null => 'gray',
+            in_array($invoice->status, ['failed', 'payment_reversed'], true) => 'danger',
+            ! $invoice->isAwaitingPayment() => 'gray',
+            $days === null => 'info',
             $days < 0 => 'danger',
             $days <= 3 => 'warning',
             default => 'info',
@@ -313,7 +323,7 @@ class AffiliateInvoices extends Page implements HasTable
             return $invoice->paid_at ? 'Paid on '.$invoice->paid_at->translatedFormat('j M Y') : null;
         }
 
-        return $invoice->due_at ? 'Due '.$invoice->due_at->translatedFormat('j M Y') : null;
+        return $invoice->isAwaitingPayment() && $invoice->due_at ? 'Due '.$invoice->due_at->translatedFormat('j M Y') : null;
     }
 
     protected function generateInvoiceAction(string $name = 'generateInvoice'): Action
@@ -364,11 +374,12 @@ class AffiliateInvoices extends Page implements HasTable
                     ->prefix('€')
                     ->required()
                     ->live(debounce: 400),
-                Textarea::make('description')
+                TextInput::make('description')
                     ->label('Invoice line')
-                    ->rows(2)
                     ->required()
-                    ->maxLength(255),
+                    ->maxLength(100)
+                    ->live(debounce: 400)
+                    ->helperText(fn (?string $state): string => mb_strlen((string) $state).' / 100 characters (Mollie\'s limit for an invoice line)'),
                 Select::make('payment_term')
                     ->label('Payment term')
                     ->options([
