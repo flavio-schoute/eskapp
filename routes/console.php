@@ -14,3 +14,4 @@ Schedule::command('contracts:sync-status')->hourly()->withoutOverlapping();
 Schedule::command('invoices:monthly-reminder')->everyFiveMinutes()->withoutOverlapping();
 // Partners get the reminder during office hours, not at night.
 Schedule::command('contracts:send-reminders')->hourlyAt(15)->between('9:00', '17:00')->timezone('Europe/Amsterdam')->withoutOverlapping();
+Schedule::command('debtors:sync')->everyThirtyMinutes()->withoutOverlapping();

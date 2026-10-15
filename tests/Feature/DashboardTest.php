@@ -16,7 +16,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->travelTo('2026-10-15 12:00');
-    actingAs(User::factory()->viewer()->create());
+    actingAs(User::factory()->create());
 });
 
 it('shows open and overdue invoices, waiting contracts and the pipeline', function () {
@@ -36,21 +36,32 @@ it('shows open and overdue invoices, waiting contracts and the pipeline', functi
         ->assertSee('Affiliates in pipeline');
 });
 
-it('charts the invoiced and paid commission per month', function () {
+it('charts the invoiced and received commission per month like the revenue page', function () {
     $affiliate = Affiliate::withoutEvents(fn () => Affiliate::factory()->create());
-    AffiliateInvoice::factory()->for($affiliate)->create(['period' => '2026-09-01', 'amount' => '100.00', 'status' => 'paid']);
-    AffiliateInvoice::factory()->for($affiliate)->create(['period' => '2026-09-01', 'amount' => '50.00', 'status' => 'issued']);
-    AffiliateInvoice::factory()->for($affiliate)->create(['period' => '2026-08-01', 'amount' => '80.00', 'status' => 'cancelled']);
+    AffiliateInvoice::factory()->for($affiliate)->create(['amount' => '100.00', 'status' => 'paid', 'created_at' => '2026-09-03 10:00', 'paid_at' => '2026-10-02 10:00']);
+    AffiliateInvoice::factory()->for($affiliate)->create(['amount' => '50.00', 'status' => 'issued', 'created_at' => '2026-09-04 10:00']);
+    AffiliateInvoice::factory()->for($affiliate)->create(['amount' => '80.00', 'status' => 'cancelled', 'created_at' => '2026-08-04 10:00']);
 
     $data = (fn () => $this->getData())->call(Livewire::test(CommissionChart::class)->instance());
 
     expect($data['labels'])->toHaveCount(12)
         ->and($data['labels'][10])->toBe('Sep 2026')
         ->and($data['datasets'][0]['data'][10])->toBe(150.0)
-        ->and($data['datasets'][1]['data'][10])->toBe(100.0)
+        ->and($data['datasets'][1]['data'][10])->toBe(0.0)
+        ->and($data['datasets'][1]['data'][11])->toBe(100.0)
         ->and($data['datasets'][0]['data'][9])->toBe(0.0);
 });
 
 it('shows the dashboard to everyone', function () {
     get('/admin')->assertOk()->assertSeeLivewire(DashboardStats::class)->assertSeeLivewire(CommissionChart::class);
+});
+
+it('only shows viewers the contracts and pipeline tiles', function () {
+    actingAs(User::factory()->viewer()->create());
+
+    get('/admin')->assertOk()->assertSeeLivewire(DashboardStats::class)->assertDontSeeLivewire(CommissionChart::class);
+
+    Livewire::test(DashboardStats::class)
+        ->assertSee(['Contracts waiting for a signature', 'Affiliates in pipeline'])
+        ->assertDontSee(['Open invoices', 'Overdue invoices']);
 });

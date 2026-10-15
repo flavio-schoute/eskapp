@@ -11,6 +11,7 @@ enum Integration: string implements HasColor, HasLabel
     case Slack = 'slack';
     case Mollie = 'mollie';
     case ESignatures = 'esignatures';
+    case PlugAndPay = 'plug_and_pay';
 
     public function getLabel(): string
     {
@@ -19,6 +20,7 @@ enum Integration: string implements HasColor, HasLabel
             self::Slack => 'Slack',
             self::Mollie => 'Mollie',
             self::ESignatures => 'eSignatures',
+            self::PlugAndPay => 'Plug&Pay',
         };
     }
 
@@ -29,6 +31,7 @@ enum Integration: string implements HasColor, HasLabel
             self::Slack => 'primary',
             self::Mollie => 'success',
             self::ESignatures => 'warning',
+            self::PlugAndPay => 'info',
         };
     }
 }

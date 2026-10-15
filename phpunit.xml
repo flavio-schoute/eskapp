@@ -30,6 +30,7 @@
         <env name="SLACK_BOT_USER_OAUTH_TOKEN" value=""/>
         <env name="MOLLIE_KEY" value=""/>
         <env name="ESIGNATURES_SECRET_TOKEN" value=""/>
+        <env name="PLUG_AND_PAY_API_KEY" value=""/>
         <env name="VIES_VALIDATION" value="false"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

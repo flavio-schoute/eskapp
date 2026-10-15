@@ -53,8 +53,14 @@ return [
         'test_mode' => in_array(env('ESIGNATURES_TEST_MODE'), [null, ''], true) || filter_var(env('ESIGNATURES_TEST_MODE'), FILTER_VALIDATE_BOOL),
     ],
 
+    'plug_and_pay' => [
+        'api_key' => env('PLUG_AND_PAY_API_KEY'),
+    ],
+
     'mollie' => [
         'key' => env('MOLLIE_KEY'),
+        // For links to payments in the Mollie dashboard.
+        'dashboard_organization' => env('MOLLIE_DASHBOARD_ORGANIZATION', 'org_19111288'),
     ],
 
     'vies' => [

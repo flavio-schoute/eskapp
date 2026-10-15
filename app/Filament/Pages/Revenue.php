@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\AdminOnly;
 use App\Filament\Widgets\RevenueStats;
 use App\Models\User;
 use App\Support\RevenueReport;
@@ -30,6 +31,7 @@ use UnitEnum;
  */
 class Revenue extends Page implements HasTable
 {
+    use AdminOnly;
     use InteractsWithTable;
 
     protected static string|UnitEnum|null $navigationGroup = 'Affiliates';

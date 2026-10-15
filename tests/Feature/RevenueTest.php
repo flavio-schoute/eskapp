@@ -79,16 +79,18 @@ it('shows the revenue page with this month and the last 12 months', function () 
     expect($perAffiliate)->toContain('Acme')->toContain('Bolt')->toContain('€ 20,00')->toContain('€ 230,00');
 });
 
-it('lets only admins change the commission settings', function () {
+it('keeps viewers out of the revenue page', function () {
+    actingAs(User::factory()->viewer()->create());
+
+    get(Revenue::getUrl())->assertForbidden();
+});
+
+it('lets admins change the commission settings', function () {
     Livewire::test(Revenue::class)
         ->callAction('commissionSettings', ['manager' => 'Ben', 'percentage' => 15])
         ->assertHasNoFormErrors();
 
     expect(RevenueReport::commissionSettings())->toBe(['manager' => 'Ben', 'percentage' => 15.0]);
-
-    actingAs(User::factory()->viewer()->create());
-
-    Livewire::test(Revenue::class)->assertActionHidden('commissionSettings');
 });
 
 it('exports the months to excel', function () {

@@ -47,6 +47,9 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Affiliates')
                     ->icon(Heroicon::OutlinedUserGroup)
                     ->collapsible(),
+                NavigationGroup::make('Debiteurenbeheer')
+                    ->icon(Heroicon::OutlinedScale)
+                    ->collapsible(),
                 NavigationGroup::make('System')
                     ->icon(Heroicon::OutlinedCog6Tooth)
                     ->collapsible(),

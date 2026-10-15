@@ -9,13 +9,14 @@ use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Models\Affiliate;
 use App\Models\AffiliateContract;
 use App\Models\AffiliateInvoice;
+use App\Models\User;
 use Filament\Support\Icons\Heroicon;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
- * The dashboard tiles: open and overdue invoices, contracts waiting for a signature and the pipeline.
+ * The dashboard tiles: open and overdue invoices (admins only), contracts waiting for a signature and the pipeline.
  */
 class DashboardStats extends StatsOverviewWidget
 {
@@ -34,13 +35,15 @@ class DashboardStats extends StatsOverviewWidget
         $daysWaiting = $oldestWaiting ? (int) now()->diffInDays($oldestWaiting, true) : null;
         $pipeline = Affiliate::query()->where('status', AffiliateStatus::Pipeline)->count();
 
-        return [
-            Stat::make('Open invoices', static::money($this->totalOf($open)))
+        $isAdmin = auth()->user() instanceof User && auth()->user()->isAdmin();
+
+        return array_values(array_filter([
+            ! $isAdmin ? null : Stat::make('Open invoices', static::money($this->totalOf($open)))
                 ->description(trans_choice('{0} Nothing to be paid|{1} 1 invoice waiting for payment|[2,*] :count invoices waiting for payment', $open->count()))
                 ->icon(Heroicon::OutlinedClock)
                 ->color('info')
                 ->url(AffiliateInvoices::getUrl()),
-            Stat::make('Overdue invoices', $overdue->count())
+            ! $isAdmin ? null : Stat::make('Overdue invoices', $overdue->count())
                 ->description(($count = $overdue->count()) > 0 ? static::money($this->totalOf($overdue)).' past the due date' : 'Everything paid on time')
                 ->descriptionIcon($count > 0 ? Heroicon::OutlinedExclamationTriangle : Heroicon::OutlinedCheckCircle)
                 ->icon(Heroicon::OutlinedExclamationTriangle)
@@ -60,7 +63,7 @@ class DashboardStats extends StatsOverviewWidget
                 ->icon(AffiliateStatus::Pipeline->getIcon())
                 ->color(AffiliateStatus::Pipeline->getColor())
                 ->url(AffiliateResource::getUrl()),
-        ];
+        ]));
     }
 
     /**

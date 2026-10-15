@@ -3,6 +3,7 @@
 use App\Enums\UserRole;
 use App\Filament\Pages\AffiliateInvoices;
 use App\Filament\Pages\Contracts;
+use App\Filament\Pages\Debtors;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Filament\Resources\IntegrationErrors\IntegrationErrorResource;
@@ -112,4 +113,12 @@ it('sends a colleague a password reset link', function () {
         ->assertNotified("Password reset link sent to {$colleague->email}");
 
     Notification::assertSentTo($colleague, ResetPassword::class);
+});
+
+it('shows debiteurenbeheer to admins only', function () {
+    actingAs(User::factory()->create());
+    get(Debtors::getUrl())->assertOk()->assertSee('Debiteurenbeheer');
+
+    actingAs(User::factory()->viewer()->create());
+    get(Debtors::getUrl())->assertForbidden();
 });
