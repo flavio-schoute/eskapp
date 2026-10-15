@@ -79,6 +79,7 @@ class AffiliateContracts
             'status' => ContractStatus::Sent,
             'signer_name' => $signerName,
             'signer_email' => $signerEmail,
+            'esignatures_signer_id' => collect($contract['signers'] ?? [])->firstWhere('email', $signerEmail)['id'] ?? null,
             'sign_page_url' => collect($contract['signers'] ?? [])->firstWhere('email', $signerEmail)['sign_page_url'] ?? null,
             'is_test' => $isTest,
             'fields' => collect($terms)->except(['signer_name', 'signer_email', 'affiliate_id'])->all(),

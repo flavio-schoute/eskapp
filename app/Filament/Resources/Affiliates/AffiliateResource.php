@@ -6,6 +6,7 @@ use App\Filament\Resources\Affiliates\Pages\CreateAffiliate;
 use App\Filament\Resources\Affiliates\Pages\EditAffiliate;
 use App\Filament\Resources\Affiliates\Pages\ListAffiliates;
 use App\Filament\Resources\Affiliates\Pages\ViewAffiliate;
+use App\Filament\Resources\Affiliates\RelationManagers\ActivityLogsRelationManager;
 use App\Filament\Resources\Affiliates\Schemas\AffiliateForm;
 use App\Filament\Resources\Affiliates\Schemas\AffiliateInfolist;
 use App\Filament\Resources\Affiliates\Tables\AffiliatesTable;
@@ -47,7 +48,7 @@ class AffiliateResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            ActivityLogsRelationManager::class,
         ];
     }
 

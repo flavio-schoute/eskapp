@@ -4,6 +4,7 @@ namespace App\Filament\Resources\MessageTemplates;
 
 use App\Enums\InvoiceLanguage;
 use App\Enums\MessageTemplateType;
+use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\MessageTemplates\Pages\ManageMessageTemplates;
 use App\Filament\Resources\MessageTemplates\Widgets\SlackMessageTemplates;
 use App\Models\MessageTemplate;
@@ -27,6 +28,8 @@ use UnitEnum;
 
 class MessageTemplateResource extends Resource
 {
+    use AdminOnly;
+
     protected static ?string $model = MessageTemplate::class;
 
     protected static string|UnitEnum|null $navigationGroup = 'System';
@@ -96,9 +99,17 @@ class MessageTemplateResource extends Resource
      */
     public static function placeholderHelp(MessageTemplateType|string|null $type): Htmlable
     {
-        $type = static::typeFrom($type);
+        return static::placeholderList(static::typeFrom($type)?->placeholders() ?? []);
+    }
 
-        $rows = collect($type?->placeholders() ?? [])
+    /**
+     * A list of placeholders with what they are replaced with; click one to copy it.
+     *
+     * @param  array<string, string>  $placeholders
+     */
+    public static function placeholderList(array $placeholders, ?string $footnote = null): Htmlable
+    {
+        $rows = collect($placeholders)
             ->map(fn (string $description, string $placeholder): string => '<div style="display: flex; align-items: baseline; gap: 0.75rem; padding: 0.25rem 0;">'
                 .'<button type="button" title="Click to copy" x-data="{ copied: false }"'
                 .' x-on:click="window.navigator.clipboard.writeText('.e(json_encode($placeholder)).'); copied = true; setTimeout(() => copied = false, 1500)"'
@@ -114,6 +125,7 @@ class MessageTemplateResource extends Resource
             '<div style="margin-top: 0.25rem;">'
                 .'<div style="font-weight: 600; margin-bottom: 0.25rem;">Placeholders <span style="font-weight: 400; opacity: 0.75;">· click one to copy it</span></div>'
                 .$rows
+                .($footnote ? '<div style="margin-top: 0.375rem; opacity: 0.75;">'.e($footnote).'</div>' : '')
             .'</div>'
         );
     }

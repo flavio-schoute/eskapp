@@ -9,6 +9,7 @@ use App\Enums\InvoiceLanguage;
 use App\Enums\MessageTemplateType;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Filament\Resources\MessageTemplates\MessageTemplateResource;
+use App\Jobs\IssueAffiliateInvoice;
 use App\Models\Affiliate;
 use App\Models\AffiliateInvoice;
 use App\Models\MessageTemplate;
@@ -18,7 +19,11 @@ use App\Services\MollieSalesInvoices;
 use App\Services\SlackInvoiceMessages;
 use App\Support\InvoiceAddressFormat;
 use App\Support\InvoiceVat;
+use App\Support\SlackMessagePreview;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -27,11 +32,13 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\EmbeddedTable;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -162,6 +169,7 @@ class AffiliateInvoices extends Page implements HasTable
                             ->body($failed > 0 ? "{$failed} could not be checked; see System → Integration errors." : null)
                             ->send();
                     }),
+                $this->monthlyInvoicesAction(),
                 $this->generateInvoiceAction(),
             ])
             ->recordActions([
@@ -326,6 +334,178 @@ class AffiliateInvoices extends Page implements HasTable
         return $invoice->isAwaitingPayment() && $invoice->due_at ? 'Due '.$invoice->due_at->translatedFormat('j M Y') : null;
     }
 
+    /**
+     * Invoice every affiliate for one month at once: fill in the amounts and send them all in the background.
+     */
+    protected function monthlyInvoicesAction(): Action
+    {
+        return Action::make('monthlyInvoices')
+            ->label('Monthly invoices')
+            ->icon(Heroicon::OutlinedQueueList)
+            ->color('gray')
+            ->modalHeading('Monthly invoices')
+            ->modalDescription('Fill in the commission for each affiliate and send all invoices at once. Each one is created and emailed by Mollie with the default email template in the partner\'s language. Leave an amount empty to skip that affiliate.')
+            ->modalWidth(Width::SixExtraLarge)
+            ->modalSubmitActionLabel('Send all invoices')
+            ->fillForm(fn (): array => [
+                'period' => $period = now()->subMonthNoOverflow()->startOfMonth()->toDateString(),
+                'payment_term' => PaymentTerm::DAYS_30,
+                'post_to_slack' => true,
+                'invoices' => $this->monthlyInvoiceRows($period),
+            ])
+            ->schema([
+                Grid::make(3)->schema([
+                    Select::make('period')
+                        ->label('Invoice period')
+                        ->options(fn (): array => $this->periodOptions())
+                        ->selectablePlaceholder(false)
+                        ->required()
+                        ->live()
+                        ->afterStateUpdated(fn (?string $state, Get $get, Set $set) => $set('invoices', $this->monthlyInvoiceRows($state, $get('invoices') ?? []))),
+                    Select::make('payment_term')
+                        ->label('Payment term')
+                        ->options([
+                            PaymentTerm::DAYS_7 => '7 days',
+                            PaymentTerm::DAYS_14 => '14 days',
+                            PaymentTerm::DAYS_30 => '30 days',
+                        ])
+                        ->selectablePlaceholder(false)
+                        ->required(),
+                    Toggle::make('post_to_slack')
+                        ->label('Post in Slack')
+                        ->helperText('Message with the invoice PDF in each partner\'s channel.')
+                        ->inline(false),
+                ]),
+                Repeater::make('invoices')
+                    ->hiddenLabel()
+                    ->table([
+                        TableColumn::make('Affiliate'),
+                        TableColumn::make('Amount (excl. VAT)')->width('11rem'),
+                        TableColumn::make('Invoice line'),
+                        TableColumn::make('Last invoice')->width('13rem'),
+                    ])
+                    ->schema([
+                        Hidden::make('affiliate_id'),
+                        Hidden::make('blocked_reason'),
+                        TextEntry::make('name')
+                            ->hiddenLabel()
+                            ->weight('medium')
+                            ->helperText(fn (Get $get): ?string => $get('blocked_reason')),
+                        TextInput::make('amount')
+                            ->hiddenLabel()
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->step(0.01)
+                            ->prefix('€')
+                            ->placeholder('Skip')
+                            ->disabled(fn (Get $get): bool => filled($get('blocked_reason'))),
+                        TextInput::make('description')
+                            ->hiddenLabel()
+                            ->maxLength(100)
+                            ->required(fn (Get $get): bool => filled($get('amount')))
+                            ->disabled(fn (Get $get): bool => filled($get('blocked_reason'))),
+                        TextEntry::make('previous')
+                            ->hiddenLabel()
+                            ->color('gray')
+                            ->placeholder('Not invoiced yet'),
+                    ])
+                    ->addable(false)
+                    ->deletable(false)
+                    ->reorderable(false)
+                    ->live(),
+                TextEntry::make('monthly_summary')
+                    ->hiddenLabel()
+                    ->state(function (Get $get): string {
+                        $rows = collect($get('invoices') ?? [])->filter(fn (array $row): bool => blank($row['blocked_reason'] ?? null) && is_numeric($row['amount'] ?? null) && (float) $row['amount'] > 0);
+
+                        return trans_choice('{0} No invoices to send yet: fill in an amount.|{1} 1 invoice of :total excl. VAT will be sent.|[2,*] :count invoices, together :total excl. VAT, will be sent.', $rows->count(), [
+                            'total' => '€ '.number_format($rows->sum(fn (array $row): float => (float) $row['amount']), 2, ',', '.'),
+                        ]);
+                    })
+                    ->weight('medium'),
+            ])
+            ->action(function (array $data, Action $action): void {
+                $period = Carbon::parse($data['period']);
+                $rows = collect($data['invoices'] ?? [])->filter(fn (array $row): bool => is_numeric($row['amount'] ?? null) && (float) $row['amount'] > 0);
+                $affiliates = $this->invoiceableAffiliatesQuery()->whereKey($rows->pluck('affiliate_id'))->get()->keyBy('id');
+                $queued = 0;
+
+                foreach ($rows as $row) {
+                    $affiliate = $affiliates->get($row['affiliate_id']);
+
+                    if (! $affiliate || AffiliateInvoice::invoicedFor($affiliate, $period)) {
+                        continue;
+                    }
+
+                    IssueAffiliateInvoice::dispatch(
+                        $affiliate->getKey(),
+                        $period->toDateString(),
+                        (string) $row['amount'],
+                        $row['description'],
+                        $data['payment_term'],
+                        (bool) ($data['post_to_slack'] ?? false),
+                        auth()->id(),
+                    );
+
+                    $queued++;
+                }
+
+                if ($queued === 0) {
+                    Notification::make()
+                        ->warning()
+                        ->title('No invoices to send')
+                        ->body('Fill in an amount for at least one affiliate that has not been invoiced for '.$period->translatedFormat('F Y').' yet.')
+                        ->send();
+
+                    $action->halt();
+                }
+
+                Notification::make()
+                    ->success()
+                    ->title(trans_choice('{1} Sending 1 invoice|[2,*] Sending :count invoices', $queued).' for '.$period->translatedFormat('F Y'))
+                    ->body('Mollie creates and emails them in the background; they show up in this list within a minute. Problems show up under System → Integration errors.')
+                    ->send();
+            });
+    }
+
+    /**
+     * One row per affiliate paid by invoice for the month, keeping amounts already typed in when the month changes.
+     *
+     * @param  array<array-key, array<string, mixed>>  $previousRows
+     * @return list<array{affiliate_id: int, name: string, blocked_reason: ?string, amount: mixed, description: string, previous: ?string}>
+     */
+    protected function monthlyInvoiceRows(?string $period, array $previousRows = []): array
+    {
+        $period = Carbon::parse($period ?? now()->subMonthNoOverflow())->startOfMonth();
+        $typedAmounts = collect($previousRows)->pluck('amount', 'affiliate_id');
+
+        return $this->invoicedAffiliatesQuery()
+            ->with('latestInvoice')
+            ->orderBy('name')
+            ->get()
+            ->map(function (Affiliate $affiliate) use ($period, $typedAmounts): array {
+                $invoiced = AffiliateInvoice::invoicedFor($affiliate, $period);
+                $last = $affiliate->latestInvoice;
+
+                return [
+                    'affiliate_id' => $affiliate->getKey(),
+                    'name' => $affiliate->name,
+                    'blocked_reason' => match (true) {
+                        $invoiced !== null => 'Already invoiced'.($invoiced->invoice_number ? " ({$invoiced->invoice_number})" : ''),
+                        ! $affiliate->hasCompleteInvoiceDetails() => 'Invoice details incomplete',
+                        default => null,
+                    },
+                    'amount' => $invoiced ? null : $typedAmounts->get($affiliate->getKey()),
+                    'description' => $this->defaultDescription($affiliate->getKey(), $period->toDateString()),
+                    'previous' => $last
+                        ? '€ '.number_format((float) $last->amount, 2, ',', '.').' · '.$last->period->translatedFormat('M Y')
+                        : null,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
     protected function generateInvoiceAction(string $name = 'generateInvoice'): Action
     {
         return Action::make($name)
@@ -431,7 +611,7 @@ class AffiliateInvoices extends Page implements HasTable
                 TextEntry::make('slack_preview')
                     ->label('Slack message')
                     ->state(fn (Get $get): ?Htmlable => ($message = $this->slackPreview($get('affiliate_id'), $get('period'), $get('amount')))
-                        ? $this->slackMessagePreview($message)
+                        ? SlackMessagePreview::html($message, 'Invoice PDF')
                         : null)
                     ->placeholder('Fill in the amount to see the Slack message.')
                     ->visible(fn (Get $get): bool => $get('post_to_slack') && $this->slackChannelName($get('affiliate_id')) !== null),
@@ -670,22 +850,6 @@ class AffiliateInvoices extends Page implements HasTable
             '[invoice number]',
             SlackInvoiceMessages::formatAmount($total),
             (string) $affiliate->invoice_email,
-        );
-    }
-
-    /**
-     * A Slack-like preview: mentions shown as @member, *bold* text in bold, with the attached PDF.
-     */
-    protected function slackMessagePreview(string $message): Htmlable
-    {
-        $text = preg_replace('/&lt;@([A-Z0-9]+)&gt;/', '<span style="color: #1d9bd1; background: rgb(29 155 209 / 0.12); border-radius: 0.25rem; padding: 0 0.125rem;">@$1</span>', e($message));
-        $text = preg_replace('/\*([^*\n]+)\*/', '<strong>$1</strong>', $text);
-
-        return new HtmlString(
-            '<div style="border-left: 4px solid #4a154b; border-radius: 0.375rem; padding: 0.5rem 0.75rem; background: rgb(127 127 127 / 0.06);">'
-                .'<div style="white-space: pre-line;">'.$text.'</div>'
-                .'<div style="display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.5rem; padding: 0.25rem 0.5rem; border-radius: 0.375rem; box-shadow: inset 0 0 0 1px rgb(127 127 127 / 0.25); font-size: 0.75rem;">📄 Invoice PDF</div>'
-            .'</div>'
         );
     }
 

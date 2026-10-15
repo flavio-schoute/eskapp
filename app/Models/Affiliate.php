@@ -186,6 +186,14 @@ class Affiliate extends Model
     }
 
     /**
+     * @return HasMany<ActivityLog, $this>
+     */
+    public function activityLogs(): HasMany
+    {
+        return $this->hasMany(ActivityLog::class);
+    }
+
+    /**
      * @return HasMany<AffiliateContract, $this>
      */
     public function contracts(): HasMany

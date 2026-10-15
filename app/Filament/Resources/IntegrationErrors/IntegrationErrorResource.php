@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\IntegrationErrors;
 
 use App\Enums\Integration;
+use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Filament\Resources\IntegrationErrors\Pages\ManageIntegrationErrors;
 use App\Models\IntegrationError;
@@ -32,6 +33,8 @@ use UnitEnum;
 
 class IntegrationErrorResource extends Resource
 {
+    use AdminOnly;
+
     protected static ?string $model = IntegrationError::class;
 
     protected static string|UnitEnum|null $navigationGroup = 'System';

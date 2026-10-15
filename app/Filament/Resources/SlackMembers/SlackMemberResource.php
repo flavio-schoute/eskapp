@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\SlackMembers;
 
+use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\SlackMembers\Pages\ManageSlackMembers;
 use App\Filament\Resources\SlackMembers\Widgets\AffiliateSlackChannels;
 use App\Models\SlackMember;
@@ -21,6 +22,8 @@ use UnitEnum;
 
 class SlackMemberResource extends Resource
 {
+    use AdminOnly;
+
     protected static ?string $model = SlackMember::class;
 
     protected static string|UnitEnum|null $navigationGroup = 'System';

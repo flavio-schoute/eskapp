@@ -43,6 +43,14 @@ class ESignatures
     }
 
     /**
+     * Send the signature request to a signer again, as a reminder.
+     */
+    public function resendToSigner(string $contractId, string $signerId): void
+    {
+        $this->request()->post(self::ApiUrl."/contracts/{$contractId}/signers/{$signerId}/send_contract")->throw();
+    }
+
+    /**
      * Get the placeholder keys used in a template, cached for a few minutes.
      *
      * @return list<string>

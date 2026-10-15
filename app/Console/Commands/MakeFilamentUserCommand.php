@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\UserRole;
 use App\Models\User;
 use Filament\Commands\MakeUserCommand;
 use Illuminate\Support\Facades\Hash;
@@ -15,12 +16,12 @@ use function Laravel\Prompts\text;
 
 /**
  * Filament's make:filament-user, but only for e-Skool staff and with the app's password rules
- * (strong passwords in production).
+ * (strong passwords in production). Users made on the command line are always admins.
  */
 class MakeFilamentUserCommand extends MakeUserCommand
 {
     /**
-     * @return array{'name': string, 'email': string, 'password': string}
+     * @return array{'name': string, 'email': string, 'role': UserRole, 'password': string}
      */
     protected function getUserData(): array
     {
@@ -35,6 +36,7 @@ class MakeFilamentUserCommand extends MakeUserCommand
                 required: true,
                 validate: fn (string $email): ?string => $this->emailError($email),
             ),
+            'role' => UserRole::Admin,
             'password' => Hash::make($this->validatedOption('password', fn (string $password): ?string => $this->passwordError($password)) ?? password(
                 label: 'Password',
                 required: true,

@@ -2,13 +2,16 @@
 
 namespace App\Models;
 
+use App\Observers\AffiliateInvoiceObserver;
 use Database\Factories\AffiliateInvoiceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 
 #[Fillable([
     'affiliate_id',
@@ -28,6 +31,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'pdf_url',
     'slack_posted_at',
 ])]
+#[ObservedBy(AffiliateInvoiceObserver::class)]
 class AffiliateInvoice extends Model
 {
     /**
@@ -86,6 +90,19 @@ class AffiliateInvoice extends Model
     public function isAwaitingPayment(): bool
     {
         return in_array($this->status, ['issued', 'issuing', 'pending-payment', 'overdue'], true);
+    }
+
+    /**
+     * The affiliate's invoice for a month, unless it was cancelled: a month is invoiced only once.
+     */
+    public static function invoicedFor(Affiliate $affiliate, Carbon $period): ?self
+    {
+        return static::query()
+            ->whereBelongsTo($affiliate)
+            ->whereDate('period', $period->copy()->startOfMonth())
+            ->where('status', '!=', 'cancelled')
+            ->latest('id')
+            ->first();
     }
 
     /**

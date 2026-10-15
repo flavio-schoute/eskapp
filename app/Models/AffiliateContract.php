@@ -3,8 +3,10 @@
 namespace App\Models;
 
 use App\Enums\ContractStatus;
+use App\Observers\AffiliateContractObserver;
 use Database\Factories\AffiliateContractFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'affiliate_id',
     'created_by',
     'esignatures_contract_id',
+    'esignatures_signer_id',
     'status',
     'signer_name',
     'signer_email',
@@ -25,8 +28,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'drive_url',
     'viewed_at',
     'signed_at',
+    'reminded_at',
     'status_checked_at',
 ])]
+#[ObservedBy(AffiliateContractObserver::class)]
 class AffiliateContract extends Model
 {
     /** @use HasFactory<AffiliateContractFactory> */
@@ -45,6 +50,7 @@ class AffiliateContract extends Model
             'fields' => 'array',
             'viewed_at' => 'datetime',
             'signed_at' => 'datetime',
+            'reminded_at' => 'datetime',
             'status_checked_at' => 'datetime',
         ];
     }
@@ -63,6 +69,15 @@ class AffiliateContract extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * The partner's signer ID at eSignatures, also for contracts sent before it was stored.
+     */
+    public function signerId(): ?string
+    {
+        return $this->esignatures_signer_id
+            ?? (filled($this->sign_page_url) ? basename((string) parse_url($this->sign_page_url, PHP_URL_PATH)) : null);
     }
 
     /**
