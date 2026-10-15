@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Affiliates\Tables;
 use App\Enums\AffiliatePaymentMethod;
 use App\Enums\AffiliateStatus;
 use App\Enums\AffiliateType;
+use App\Enums\ContractStatus;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Models\Affiliate;
 use Filament\Actions\BulkActionGroup;
@@ -25,6 +26,7 @@ class AffiliatesTable
     {
         return $table
             ->defaultSort('payment_method')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('latestContract'))
             ->recordUrl(fn (Affiliate $record): string => AffiliateResource::getUrl('view', ['record' => $record]))
             ->columns([
                 TextColumn::make('name')
@@ -55,6 +57,15 @@ class AffiliatesTable
                             [AffiliatePaymentMethod::Invoice->value, AffiliatePaymentMethod::Other->value, AffiliatePaymentMethod::Automatic->value],
                         )
                         ->orderBy('name')),
+                TextColumn::make('latestContract.status')
+                    ->label('Contract')
+                    ->badge()
+                    ->formatStateUsing(fn (ContractStatus $state): string => match ($state) {
+                        ContractStatus::Sent, ContractStatus::Viewed => 'Waiting for signature',
+                        default => $state->getLabel(),
+                    })
+                    ->placeholder('Not sent')
+                    ->toggleable(),
                 TextColumn::make('agreement')
                     ->limit(50)
                     ->tooltip(fn (?string $state): ?string => $state)

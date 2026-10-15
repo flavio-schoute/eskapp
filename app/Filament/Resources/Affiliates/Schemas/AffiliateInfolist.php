@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Affiliates\Schemas;
 
+use App\Enums\ContractStatus;
 use App\Models\Affiliate;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
@@ -84,6 +85,42 @@ class AffiliateInfolist
                             ->url(fn (Affiliate $record): ?string => $record->googleDriveFolderUrl(), shouldOpenInNewTab: true)
                             ->color('primary')
                             ->placeholder('No folder yet'),
+                    ]),
+                Section::make('Contract')
+                    ->columns(4)
+                    ->columnSpanFull()
+                    ->schema([
+                        TextEntry::make('latestContract.status')
+                            ->label('Status')
+                            ->badge()
+                            ->helperText(fn (Affiliate $record): ?string => $record->latestContract?->is_test ? 'Test contract' : null)
+                            ->placeholder('No contract sent yet'),
+                        TextEntry::make('latestContract.signer_name')
+                            ->label('Signer')
+                            ->helperText(fn (Affiliate $record): ?string => $record->latestContract?->signer_email)
+                            ->placeholder('-'),
+                        TextEntry::make('latestContract.created_at')
+                            ->label('Sent')
+                            ->dateTime()
+                            ->placeholder('-'),
+                        TextEntry::make('latestContract.signed_at')
+                            ->label('Signed')
+                            ->dateTime()
+                            ->placeholder('-'),
+                        TextEntry::make('latestContract.drive_url')
+                            ->label('Signed contract')
+                            ->formatStateUsing(fn (): string => 'Open in Google Drive')
+                            ->url(fn (?string $state): ?string => $state, shouldOpenInNewTab: true)
+                            ->color('primary')
+                            ->placeholder(fn (Affiliate $record): string => $record->latestContract?->status === ContractStatus::Signed ? 'Being stored in Google Drive…' : '-')
+                            ->columnSpan(2),
+                        TextEntry::make('latestContract.sign_page_url')
+                            ->label('Signing link')
+                            ->formatStateUsing(fn (): string => 'Copy link')
+                            ->copyable()
+                            ->copyMessage('Signing link copied')
+                            ->visible(fn (Affiliate $record): bool => (bool) $record->latestContract?->status->isOpen())
+                            ->columnSpan(2),
                     ]),
                 Section::make('Invoice details')
                     ->visible(fn (Affiliate $record): bool => (bool) $record->payment_method?->requiresInvoiceDetails())

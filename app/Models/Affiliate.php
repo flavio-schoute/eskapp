@@ -186,6 +186,22 @@ class Affiliate extends Model
     }
 
     /**
+     * @return HasMany<AffiliateContract, $this>
+     */
+    public function contracts(): HasMany
+    {
+        return $this->hasMany(AffiliateContract::class);
+    }
+
+    /**
+     * @return HasOne<AffiliateContract, $this>
+     */
+    public function latestContract(): HasOne
+    {
+        return $this->hasOne(AffiliateContract::class)->latestOfMany();
+    }
+
+    /**
      * @return HasOne<AffiliateInvoice, $this>
      */
     public function latestInvoice(): HasOne

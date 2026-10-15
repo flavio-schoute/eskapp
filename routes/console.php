@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('invoices:sync-payment-status')->hourly()->withoutOverlapping();
+Schedule::command('contracts:sync-status')->hourly()->withoutOverlapping();

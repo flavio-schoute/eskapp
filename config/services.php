@@ -35,6 +35,19 @@ return [
         'affiliates_folder_id' => env('GOOGLE_DRIVE_AFFILIATES_FOLDER_ID'),
     ],
 
+    'esignatures' => [
+        'secret_token' => env('ESIGNATURES_SECRET_TOKEN'),
+        // The ID shown when editing the affiliate contract template in eSignatures.
+        'template_id' => env('ESIGNATURES_TEMPLATE_ID'),
+        // Signs every contract for e-Skool automatically, after the partner signed.
+        'eskool_signer' => [
+            'name' => env('ESIGNATURES_ESKOOL_SIGNER_NAME', 'Gairo Juliana'),
+            'email' => env('ESIGNATURES_ESKOOL_SIGNER_EMAIL', 'ops@e-skool.nl'),
+        ],
+        // Test contracts are free and marked as demo; set to false in production. Empty means test mode.
+        'test_mode' => in_array(env('ESIGNATURES_TEST_MODE'), [null, ''], true) || filter_var(env('ESIGNATURES_TEST_MODE'), FILTER_VALIDATE_BOOL),
+    ],
+
     'mollie' => [
         'key' => env('MOLLIE_KEY'),
     ],

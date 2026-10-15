@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Affiliates\Pages;
 
+use App\Filament\Resources\Affiliates\Actions\ContractActions;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
@@ -13,6 +14,8 @@ class ViewAffiliate extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            ContractActions::refreshStatus(),
+            ContractActions::generate(),
             EditAction::make(),
         ];
     }

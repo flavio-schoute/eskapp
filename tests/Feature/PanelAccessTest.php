@@ -1,7 +1,10 @@
 <?php
 
 use App\Models\User;
+use Filament\Auth\Notifications\ResetPassword;
+use Filament\Auth\Pages\PasswordReset\RequestPasswordReset;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 
 use function Pest\Laravel\actingAs;
 use function Pest\Laravel\get;
@@ -65,4 +68,18 @@ it('ships every icon file the pages and manifest refer to', function () {
         ->and($dimensions('favicon-eskool-192.png'))->toBe([192, 192])
         ->and($dimensions('favicon-eskool-apple-touch.png'))->toBe([180, 180])
         ->and(file_get_contents(public_path('favicon-eskool.svg')))->toStartWith('<svg xmlns="http://www.w3.org/2000/svg"');
+});
+
+it('lets users reset a forgotten password', function () {
+    Notification::fake();
+    $user = User::factory()->create(['email' => 'flavio@e-skool.nl']);
+
+    get('/admin/login')->assertSee(Filament\Facades\Filament::getRequestPasswordResetUrl());
+
+    Livewire\Livewire::test(RequestPasswordReset::class)
+        ->fillForm(['email' => 'flavio@e-skool.nl'])
+        ->call('request')
+        ->assertHasNoFormErrors();
+
+    Notification::assertSentTo($user, ResetPassword::class);
 });

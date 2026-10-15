@@ -10,6 +10,7 @@ enum Integration: string implements HasColor, HasLabel
     case GoogleDrive = 'google_drive';
     case Slack = 'slack';
     case Mollie = 'mollie';
+    case ESignatures = 'esignatures';
 
     public function getLabel(): string
     {
@@ -17,6 +18,7 @@ enum Integration: string implements HasColor, HasLabel
             self::GoogleDrive => 'Google Drive',
             self::Slack => 'Slack',
             self::Mollie => 'Mollie',
+            self::ESignatures => 'eSignatures',
         };
     }
 
@@ -26,6 +28,7 @@ enum Integration: string implements HasColor, HasLabel
             self::GoogleDrive => 'info',
             self::Slack => 'primary',
             self::Mollie => 'success',
+            self::ESignatures => 'warning',
         };
     }
 }

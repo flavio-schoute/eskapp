@@ -32,6 +32,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->passwordReset()
             ->brandName('e-Skool Tools')
             ->renderHook(PanelsRenderHook::HEAD_END, fn () => view('filament.favicons'))
             ->renderHook(
