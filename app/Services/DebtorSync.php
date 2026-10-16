@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\DebtorCaseType;
 use App\Models\DebtorCase;
+use App\Models\DebtorCaseEvent;
 use Illuminate\Support\Arr;
 
 /**
@@ -28,16 +29,34 @@ class DebtorSync
             ->collect();
 
         foreach ($orders as [$order, $type]) {
-            DebtorCase::updateOrCreate(
-                ['plug_and_pay_order_id' => $order['id']],
-                [...static::attributesFrom($order), 'type' => $type, 'resolved_at' => null, 'synced_at' => now()],
-            );
+            $case = DebtorCase::firstOrNew(['plug_and_pay_order_id' => $order['id']]);
+            $isNew = ! $case->exists;
+            $wasResolved = $case->resolved_at !== null;
+            $previousType = $case->type;
+
+            $case->fill([...static::attributesFrom($order), 'type' => $type, 'resolved_at' => null, 'synced_at' => now()])->save();
+
+            match (true) {
+                $isNew => $case->recordEvent(DebtorCaseEvent::Opened, $type === DebtorCaseType::ChargedBack
+                    ? 'Payment charged back (gestorneerd), case opened'
+                    : 'Invoice unpaid, case opened', bySync: true),
+                $wasResolved => $case->recordEvent(DebtorCaseEvent::Reopened, "Case reopened: {$type->getLabel()} again in Plug&Pay", bySync: true),
+                $previousType !== $type && $type === DebtorCaseType::ChargedBack => $case->recordEvent(DebtorCaseEvent::ChargedBack, 'Payment charged back (gestorneerd)', bySync: true),
+                default => null,
+            };
         }
 
-        $resolved = DebtorCase::query()
+        $resolvedCases = DebtorCase::query()
             ->open()
             ->whereNotIn('plug_and_pay_order_id', $orders->map(fn (array $pair): int => $pair[0]['id'])->all())
-            ->update(['resolved_at' => now()]);
+            ->get();
+
+        foreach ($resolvedCases as $case) {
+            $case->update(['resolved_at' => now()]);
+            $case->recordEvent(DebtorCaseEvent::Resolved, 'Paid or resolved in Plug&Pay, case closed', bySync: true);
+        }
+
+        $resolved = $resolvedCases->count();
 
         return ['open' => $orders->count(), 'resolved' => $resolved];
     }
@@ -59,7 +78,7 @@ class DebtorSync
             'amount_with_tax' => $order['amount_with_tax'] ?? 0,
             'customer_name' => $name !== '' ? $name : null,
             'company' => $contact['company'] ?? null,
-            'email' => $contact['email'] ?? null,
+            'email' => filled($contact['email'] ?? null) ? CustomerSync::normalizeEmail($contact['email']) : null,
             'phone' => $contact['telephone'] ?? null,
             'country' => Arr::get($order, 'billing.address.country'),
             'payment_url' => Arr::get($order, 'payment.url'),

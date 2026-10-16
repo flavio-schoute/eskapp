@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * An unpaid or charged back Plug&Pay order that needs following up (debiteurenbeheer).
@@ -74,6 +75,31 @@ class DebtorCase extends Model
     protected function open(Builder $query): void
     {
         $query->whereNull('resolved_at');
+    }
+
+    /**
+     * @return HasMany<DebtorCaseEvent, $this>
+     */
+    public function events(): HasMany
+    {
+        return $this->hasMany(DebtorCaseEvent::class);
+    }
+
+    /**
+     * Add a moment to the timeline, by the signed-in colleague, or by the Plug&Pay sync when $bySync is true.
+     */
+    public function recordEvent(string $type, string $title, ?string $body = null, bool $bySync = false): DebtorCaseEvent
+    {
+        $user = $bySync ? null : auth()->user();
+
+        return $this->events()->create([
+            'user_id' => $user?->getKey(),
+            'user_name' => $user?->name,
+            'type' => $type,
+            'title' => $title,
+            'body' => $body,
+            'created_at' => now(),
+        ]);
     }
 
     public function plugAndPayUrl(): string

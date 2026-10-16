@@ -2,7 +2,10 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Auth\EditProfile;
 use App\Providers\AppServiceProvider;
+use Filament\Enums\UserMenuPosition;
+use Filament\Facades\Filament;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -33,9 +36,12 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login()
             ->passwordReset()
+            ->profile(EditProfile::class, isSimple: false)
+            ->userMenu(position: UserMenuPosition::Sidebar)
+            ->sidebarCollapsibleOnDesktop()
             ->brandName('e-Skool Tools')
             ->renderHook(PanelsRenderHook::HEAD_END, fn () => view('filament.favicons'))
-            ->renderHook(PanelsRenderHook::STYLES_AFTER, fn () => view('filament.external-link-styles'))
+            ->renderHook(PanelsRenderHook::STYLES_AFTER, fn () => view('filament.sidebar-styles'))
             ->renderHook(
                 PanelsRenderHook::STYLES_AFTER,
                 fn () => view('filament.notification-countdown-styles', ['duration' => AppServiceProvider::NotificationDuration]),
@@ -53,6 +59,8 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('System')
                     ->icon(Heroicon::OutlinedCog6Tooth)
                     ->collapsible(),
+                NavigationGroup::make('Settings')
+                    ->collapsible(false),
             ])
             ->navigationItems([
                 NavigationItem::make('Finance')
@@ -60,6 +68,12 @@ class AdminPanelProvider extends PanelProvider
                     ->sort(10)
                     ->url(fn (): string => config('services.finance_dashboard.url'), shouldOpenInNewTab: true)
                     ->visible(fn (): bool => filled(config('services.finance_dashboard.url'))),
+                NavigationItem::make('Profile')
+                    ->group('Settings')
+                    ->icon(Heroicon::OutlinedUserCircle)
+                    ->sort(2)
+                    ->url(fn (): string => Filament::getProfileUrl())
+                    ->isActiveWhen(fn (): bool => request()->routeIs('filament.admin.auth.profile')),
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')

@@ -7,6 +7,7 @@ use App\Filament\Resources\ActivityLogs\Pages\ListActivityLogs;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Models\ActivityLog;
 use App\Models\User;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Resources\Resource;
@@ -29,6 +30,8 @@ class ActivityLogResource extends Resource
     protected static ?string $model = ActivityLog::class;
 
     protected static string|UnitEnum|null $navigationGroup = 'System';
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 
     protected static ?int $navigationSort = 5;
 

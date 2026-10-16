@@ -13,8 +13,10 @@ use App\Filament\Resources\Affiliates\Tables\AffiliatesTable;
 use App\Filament\Resources\Affiliates\Widgets\AffiliateStatusOverview;
 use App\Filament\Resources\Affiliates\Widgets\PipelineAffiliates;
 use App\Models\Affiliate;
+use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use UnitEnum;
 
@@ -23,6 +25,8 @@ class AffiliateResource extends Resource
     protected static ?string $model = Affiliate::class;
 
     protected static string|UnitEnum|null $navigationGroup = 'Affiliates';
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
 
     protected static ?string $navigationLabel = 'All affiliates';
 

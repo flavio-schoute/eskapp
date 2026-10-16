@@ -1,5 +1,7 @@
 <?php
 
+use App\Filament\Pages\Debtors;
+use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Models\User;
 use Filament\Auth\Notifications\ResetPassword;
 use Filament\Auth\Pages\PasswordReset\RequestPasswordReset;
@@ -89,4 +91,14 @@ it('links to the finance dashboard in the navigation', function () {
     actingAs(User::factory()->create());
 
     get('/admin')->assertOk()->assertSee('Finance')->assertSee('https://finance.example.com');
+});
+
+it('links each group icon in the collapsed sidebar to the first item of the group', function () {
+    actingAs(User::factory()->create());
+
+    $html = get('/admin')->assertOk()->getContent();
+
+    expect($html)
+        ->toMatch('~href="'.preg_quote(AffiliateResource::getUrl(), '~').'"[^>]*aria-label="Affiliates"~s')
+        ->toMatch('~href="'.preg_quote(Debtors::getUrl(), '~').'"[^>]*aria-label="Debiteurenbeheer"~s');
 });

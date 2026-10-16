@@ -20,6 +20,7 @@ use App\Services\SlackInvoiceMessages;
 use App\Support\InvoiceAddressFormat;
 use App\Support\InvoiceVat;
 use App\Support\SlackMessagePreview;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
@@ -60,6 +61,8 @@ class AffiliateInvoices extends Page implements HasTable
     use InteractsWithTable;
 
     protected static string|UnitEnum|null $navigationGroup = 'Affiliates';
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentCurrencyEuro;
 
     protected static ?int $navigationSort = 2;
 

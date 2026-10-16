@@ -2,6 +2,7 @@
 
 use App\Enums\UserRole;
 use App\Filament\Pages\AffiliateInvoices;
+use App\Filament\Pages\Auth\EditProfile;
 use App\Filament\Pages\Contracts;
 use App\Filament\Pages\Debtors;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
@@ -121,4 +122,25 @@ it('shows debiteurenbeheer to admins only', function () {
 
     actingAs(User::factory()->viewer()->create());
     get(Debtors::getUrl())->assertForbidden();
+});
+
+it('lets everyone change their name on the profile page', function () {
+    actingAs($user = User::factory()->viewer()->create(['name' => 'Old name']));
+
+    get(Filament\Facades\Filament::getProfileUrl())->assertOk()->assertSee(['Avatar', 'Password', 'Coming soon']);
+
+    Livewire::test(EditProfile::class)
+        ->fillForm(['name' => 'Gairo Juliana'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($user->fresh()->name)->toBe('Gairo Juliana');
+});
+
+it('shows team and profile under settings, with the team for admins only', function () {
+    actingAs(User::factory()->create());
+    get('/admin')->assertSeeInOrder(['System', 'Settings', 'Team', 'Profile']);
+
+    actingAs(User::factory()->viewer()->create());
+    get('/admin')->assertSee('Profile')->assertDontSee('>Team<', escape: false);
 });

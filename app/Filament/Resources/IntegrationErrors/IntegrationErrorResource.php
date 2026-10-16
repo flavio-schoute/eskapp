@@ -8,6 +8,7 @@ use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Filament\Resources\IntegrationErrors\Pages\ManageIntegrationErrors;
 use App\Models\IntegrationError;
 use App\Support\JsonCodeBlock;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
@@ -38,6 +39,8 @@ class IntegrationErrorResource extends Resource
     protected static ?string $model = IntegrationError::class;
 
     protected static string|UnitEnum|null $navigationGroup = 'System';
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBugAnt;
 
     protected static ?string $navigationLabel = 'Integration errors';
 

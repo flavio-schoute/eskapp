@@ -53,14 +53,34 @@ class PlugAndPay
             ->put('limit', $perPage)
             ->all();
 
-        return LazyCollection::make(function () use ($query) {
+        return $this->paginate('/orders', $query);
+    }
+
+    /**
+     * All customers with their order totals (name, email, count, total, open, last_order), page by page.
+     * Plug&Pay returns 20 customers per page, whatever limit is asked.
+     *
+     * @return LazyCollection<int, array<string, mixed>>
+     */
+    public function customers(): LazyCollection
+    {
+        return $this->paginate('/customers');
+    }
+
+    /**
+     * @param  array<string, mixed>  $query
+     * @return LazyCollection<int, array<string, mixed>>
+     */
+    private function paginate(string $path, array $query = []): LazyCollection
+    {
+        return LazyCollection::make(function () use ($path, $query) {
             $page = 1;
 
             do {
-                $response = $this->request()->get('/orders', [...$query, 'page' => $page])->throw();
+                $response = $this->request()->get($path, [...$query, 'page' => $page])->throw();
 
-                foreach ($response->json('data') ?? [] as $order) {
-                    yield $order;
+                foreach ($response->json('data') ?? [] as $item) {
+                    yield $item;
                 }
 
                 $lastPage = (int) $response->json('meta.last_page', 1);

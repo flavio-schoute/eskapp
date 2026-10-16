@@ -6,6 +6,7 @@ use App\Filament\Concerns\AdminOnly;
 use App\Filament\Widgets\RevenueStats;
 use App\Models\User;
 use App\Support\RevenueReport;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\TextEntry;
@@ -35,6 +36,8 @@ class Revenue extends Page implements HasTable
     use InteractsWithTable;
 
     protected static string|UnitEnum|null $navigationGroup = 'Affiliates';
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedChartBar;
 
     protected static ?int $navigationSort = 4;
 

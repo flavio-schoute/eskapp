@@ -6,6 +6,7 @@ use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\SlackMembers\Pages\ManageSlackMembers;
 use App\Filament\Resources\SlackMembers\Widgets\AffiliateSlackChannels;
 use App\Models\SlackMember;
+use BackedEnum;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -15,6 +16,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Table;
@@ -27,6 +29,8 @@ class SlackMemberResource extends Resource
     protected static ?string $model = SlackMember::class;
 
     protected static string|UnitEnum|null $navigationGroup = 'System';
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedChatBubbleLeftRight;
 
     protected static ?int $navigationSort = 2;
 

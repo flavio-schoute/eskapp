@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\Users\Pages\ManageUsers;
 use App\Models\User;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -30,11 +31,17 @@ class UserResource extends Resource
 
     protected static ?string $model = User::class;
 
-    protected static string|UnitEnum|null $navigationGroup = 'System';
+    protected static string|UnitEnum|null $navigationGroup = 'Settings';
 
-    protected static ?int $navigationSort = 4;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserGroup;
 
-    protected static ?string $navigationLabel = 'Users';
+    protected static ?int $navigationSort = 1;
+
+    protected static ?string $navigationLabel = 'Team';
+
+    protected static ?string $modelLabel = 'team member';
+
+    protected static ?string $pluralModelLabel = 'team';
 
     protected static ?string $recordTitleAttribute = 'name';
 
@@ -74,7 +81,7 @@ class UserResource extends Resource
     {
         return $table
             ->recordTitleAttribute('name')
-            ->heading('Users')
+            ->heading('Team')
             ->description('Who can sign in. Admins can do everything; viewers work with affiliates, invoices and contracts, but cannot open the System settings.')
             ->defaultSort('name')
             ->columns([

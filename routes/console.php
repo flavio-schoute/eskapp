@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\SyncCustomers;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -15,3 +16,4 @@ Schedule::command('invoices:monthly-reminder')->everyFiveMinutes()->withoutOverl
 // Partners get the reminder during office hours, not at night.
 Schedule::command('contracts:send-reminders')->hourlyAt(15)->between('9:00', '17:00')->timezone('Europe/Amsterdam')->withoutOverlapping();
 Schedule::command('debtors:sync')->everyThirtyMinutes()->withoutOverlapping();
+Schedule::job(new SyncCustomers)->dailyAt('04:00')->timezone('Europe/Amsterdam');

@@ -7,6 +7,7 @@ use App\Enums\ContractStatus;
 use App\Filament\Resources\Affiliates\Actions\ContractActions;
 use App\Filament\Resources\Affiliates\AffiliateResource;
 use App\Models\Affiliate;
+use BackedEnum;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\EmbeddedTable;
 use Filament\Schemas\Schema;
@@ -27,6 +28,8 @@ class Contracts extends Page implements HasTable
     use InteractsWithTable;
 
     protected static string|UnitEnum|null $navigationGroup = 'Affiliates';
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedPencilSquare;
 
     protected static ?int $navigationSort = 3;
 

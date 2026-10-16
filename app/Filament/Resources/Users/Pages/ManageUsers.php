@@ -15,7 +15,7 @@ class ManageUsers extends ManageRecords
     {
         return [
             CreateAction::make()
-                ->label('Add user')
+                ->label('Add team member')
                 ->successNotificationTitle(fn (User $record): string => "User {$record->name} added as {$record->role->getLabel()}"),
         ];
     }

@@ -5,10 +5,12 @@ namespace App\Filament\Pages;
 use App\Enums\DebtorCaseType;
 use App\Enums\Integration;
 use App\Filament\Concerns\AdminOnly;
+use App\Filament\Resources\DebtorCases\DebtorCaseResource;
 use App\Models\DebtorCase;
 use App\Services\DebtorSync;
 use App\Services\IntegrationErrorLogger;
 use App\Services\PlugAndPay;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Notifications\Notification;
@@ -37,6 +39,8 @@ class Debtors extends Page implements HasTable
     use InteractsWithTable;
 
     protected static string|UnitEnum|null $navigationGroup = 'Debiteurenbeheer';
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedExclamationCircle;
 
     protected static ?string $navigationLabel = 'Overview';
 
@@ -104,11 +108,6 @@ class Debtors extends Page implements HasTable
                     ->money('EUR', locale: 'nl')
                     ->weight('medium')
                     ->sortable(),
-                TextColumn::make('amount_with_tax')
-                    ->label('Incl. VAT')
-                    ->money('EUR', locale: 'nl')
-                    ->color('gray')
-                    ->sortable(),
                 TextColumn::make('invoice_date')
                     ->label('Invoice date')
                     ->date('j M Y')
@@ -133,40 +132,13 @@ class Debtors extends Page implements HasTable
                         false: fn (Builder $query): Builder => $query->whereNotNull('resolved_at'),
                     ),
             ])
-            ->recordUrl(fn (DebtorCase $record): string => $record->plugAndPayUrl(), shouldOpenInNewTab: true)
+            ->recordUrl(fn (DebtorCase $record): string => DebtorCaseResource::getUrl('view', ['record' => $record]))
             ->recordActions([
-                Action::make('whatsApp')
-                    ->label('WhatsApp')
-                    ->icon(Heroicon::OutlinedChatBubbleLeftEllipsis)
-                    ->color('success')
-                    ->url(fn (DebtorCase $record): ?string => $record->whatsAppUrl(static::whatsAppMessage($record)), shouldOpenInNewTab: true)
-                    ->visible(fn (DebtorCase $record): bool => $record->whatsAppNumber() !== null && $record->resolved_at === null),
-                ActionGroup::make([
-                    Action::make('copyPaymentLink')
-                        ->label('Copy payment link')
-                        ->icon(Heroicon::OutlinedLink)
-                        ->visible(fn (DebtorCase $record): bool => filled($record->payment_url))
-                        ->alpineClickHandler(fn (DebtorCase $record): string => 'window.navigator.clipboard.writeText('.json_encode($record->payment_url).'); $tooltip(\'Copied\', { timeout: 1500 })'),
-                    Action::make('email')
-                        ->label('Email customer')
-                        ->icon(Heroicon::OutlinedEnvelope)
-                        ->url(fn (DebtorCase $record): ?string => $record->email ? 'mailto:'.$record->email.'?subject='.rawurlencode('Factuur '.$record->invoice_number).'&body='.rawurlencode(static::whatsAppMessage($record)) : null)
-                        ->visible(fn (DebtorCase $record): bool => filled($record->email)),
-                    Action::make('invoice')
-                        ->label('Invoice PDF')
-                        ->icon(Heroicon::OutlinedDocumentText)
-                        ->url(fn (DebtorCase $record): ?string => $record->invoice_url, shouldOpenInNewTab: true)
-                        ->visible(fn (DebtorCase $record): bool => filled($record->invoice_url)),
-                    Action::make('plugAndPay')
-                        ->label('Open in Plug&Pay')
-                        ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
-                        ->url(fn (DebtorCase $record): string => $record->plugAndPayUrl(), shouldOpenInNewTab: true),
-                    Action::make('mollie')
-                        ->label('Open in Mollie')
-                        ->icon(Heroicon::OutlinedCreditCard)
-                        ->url(fn (DebtorCase $record): ?string => $record->mollie_transaction_id ? 'https://my.mollie.com/dashboard/'.config('services.mollie.dashboard_organization')."/payments/{$record->mollie_transaction_id}" : null, shouldOpenInNewTab: true)
-                        ->visible(fn (DebtorCase $record): bool => filled($record->mollie_transaction_id)),
-                ]),
+                Action::make('view')
+                    ->label('Bekijk dossier')
+                    ->icon(Heroicon::OutlinedFolderOpen)
+                    ->url(fn (DebtorCase $record): string => DebtorCaseResource::getUrl('view', ['record' => $record])),
+                ActionGroup::make(DebtorCaseResource::caseActions()),
             ])
             ->headerActions([
                 Action::make('sync')
