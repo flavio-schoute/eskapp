@@ -86,13 +86,6 @@ it('lets users reset a forgotten password', function () {
     Notification::assertSentTo($user, ResetPassword::class);
 });
 
-it('links to the finance dashboard in the navigation', function () {
-    config(['services.finance_dashboard.url' => 'https://finance.example.com']);
-    actingAs(User::factory()->create());
-
-    get('/admin')->assertOk()->assertSee('Finance')->assertSee('https://finance.example.com');
-});
-
 it('links each group icon in the collapsed sidebar to the first item of the group', function () {
     actingAs(User::factory()->create());
 

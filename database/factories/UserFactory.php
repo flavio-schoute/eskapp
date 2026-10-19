@@ -36,6 +36,16 @@ class UserFactory extends Factory
     }
 
     /**
+     * Indicate that the user is an editor ("bewerker"): affiliates and Finance, not the System settings.
+     */
+    public function editor(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => UserRole::Editor,
+        ]);
+    }
+
+    /**
      * Indicate that the user may only work with affiliates, not with the System settings.
      */
     public function viewer(): static

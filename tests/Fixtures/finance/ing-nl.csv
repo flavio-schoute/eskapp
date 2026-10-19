@@ -1,0 +1,6 @@
+"Datum";"Naam / Omschrijving";"Rekening";"Tegenrekening";"Code";"Af Bij";"Bedrag (EUR)";"Mutatiesoort";"Mededelingen";"Saldo na mutatie";"Tag"
+"20260901";"Google Ireland Limited";"NL00INGB0000000001";"NL00CITI0000000002";"IC";"Af";"1.250,00";"Incasso";"Naam: Google Ireland Limited Omschrijving: Google Ads 12345 IBAN: NL00CITI0000000002 Kenmerk: ABC Machtiging ID: XYZ Valutadatum: 01-09-2026";"10.000,00";""
+"20260901";"Voorbeeld Coaching BV";"NL00INGB0000000001";"NL00RABO0000000003";"GT";"Af";"605,00";"Online bankieren";"Naam: Voorbeeld Coaching BV Omschrijving: Factuur 2026-014 flat fee IBAN: NL00RABO0000000003 Valutadatum: 01-09-2026";"8.750,00";""
+"20260902";"Stichting Mollie Payments";"NL00INGB0000000001";"NL00DEUT0000000004";"OV";"Bij";"4.321,09";"Overschrijving";"Naam: Stichting Mollie Payments Omschrijving: Uitbetaling st.12345 IBAN: NL00DEUT0000000004 Valutadatum: 02-09-2026";"13.071,09";""
+"20260903";"Koffiebar Centrum";"NL00INGB0000000001";"";"BA";"Af";"4,50";"Betaalautomaat";"Pasvolgnr: 001 03-09-2026 08:12 Transactie: A1B2C3 Term: T1";"13.066,59";""
+"20260903";"Koffiebar Centrum";"NL00INGB0000000001";"";"BA";"Af";"4,50";"Betaalautomaat";"Pasvolgnr: 001 03-09-2026 08:12 Transactie: A1B2C3 Term: T1";"13.066,59";""

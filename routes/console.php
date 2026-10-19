@@ -1,6 +1,8 @@
 <?php
 
+use App\Jobs\Finance\SyncFinanceOrders;
 use App\Jobs\SyncCustomers;
+use App\Jobs\SyncProducts;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -17,3 +19,8 @@ Schedule::command('invoices:monthly-reminder')->everyFiveMinutes()->withoutOverl
 Schedule::command('contracts:send-reminders')->hourlyAt(15)->between('9:00', '17:00')->timezone('Europe/Amsterdam')->withoutOverlapping();
 Schedule::command('debtors:sync')->everyThirtyMinutes()->withoutOverlapping();
 Schedule::job(new SyncCustomers)->dailyAt('04:00')->timezone('Europe/Amsterdam');
+Schedule::job(new SyncProducts)->dailyAt('04:30')->timezone('Europe/Amsterdam');
+Schedule::job(new SyncFinanceOrders(days: 120))->hourlyAt(20);
+Schedule::job(new SyncFinanceOrders(days: null))->dailyAt('03:30')->timezone('Europe/Amsterdam');
+// Budgets, subscriptions and possible duplicate or unusual payments; set under System → Slack settings.
+Schedule::command('finance:check-signals')->dailyAt('08:45')->timezone('Europe/Amsterdam')->withoutOverlapping();

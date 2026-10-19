@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Pages\Auth\EditProfile;
+use App\Filament\Pages\Finance\Inbox;
 use App\Providers\AppServiceProvider;
 use Filament\Enums\UserMenuPosition;
 use Filament\Facades\Filament;
@@ -42,6 +43,9 @@ class AdminPanelProvider extends PanelProvider
             ->brandName('e-Skool Tools')
             ->renderHook(PanelsRenderHook::HEAD_END, fn () => view('filament.favicons'))
             ->renderHook(PanelsRenderHook::STYLES_AFTER, fn () => view('filament.sidebar-styles'))
+            ->renderHook(PanelsRenderHook::PAGE_END, fn () => view('filament.finance.inbox-shortcuts'), scopes: Inbox::class)
+            // Before Filament's scripts, so the chart widgets pick up the Finance chart plugin when they start.
+            ->renderHook(PanelsRenderHook::SCRIPTS_BEFORE, fn (): string => '<script src="'.asset('js/finance-charts.js').'?v='.filemtime(public_path('js/finance-charts.js')).'"></script>')
             ->renderHook(
                 PanelsRenderHook::STYLES_AFTER,
                 fn () => view('filament.notification-countdown-styles', ['duration' => AppServiceProvider::NotificationDuration]),
@@ -56,6 +60,9 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Debiteurenbeheer')
                     ->icon(Heroicon::OutlinedScale)
                     ->collapsible(),
+                NavigationGroup::make('Finance')
+                    ->icon(Heroicon::OutlinedBanknotes)
+                    ->collapsible(),
                 NavigationGroup::make('System')
                     ->icon(Heroicon::OutlinedCog6Tooth)
                     ->collapsible(),
@@ -63,11 +70,6 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsible(false),
             ])
             ->navigationItems([
-                NavigationItem::make('Finance')
-                    ->icon(Heroicon::OutlinedBanknotes)
-                    ->sort(10)
-                    ->url(fn (): string => config('services.finance_dashboard.url'), shouldOpenInNewTab: true)
-                    ->visible(fn (): bool => filled(config('services.finance_dashboard.url'))),
                 NavigationItem::make('Profile')
                     ->group('Settings')
                     ->icon(Heroicon::OutlinedUserCircle)

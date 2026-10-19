@@ -68,6 +68,16 @@ class PlugAndPay
     }
 
     /**
+     * All products (title, type, sku, ...), page by page; with $deleted the products deleted in Plug&Pay instead.
+     *
+     * @return LazyCollection<int, array<string, mixed>>
+     */
+    public function products(bool $deleted = false): LazyCollection
+    {
+        return $this->paginate('/products', ['limit' => 100, ...($deleted ? ['is_deleted' => 1] : [])]);
+    }
+
+    /**
      * @param  array<string, mixed>  $query
      * @return LazyCollection<int, array<string, mixed>>
      */

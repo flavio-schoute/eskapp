@@ -5,6 +5,7 @@ namespace App\Filament\Resources\SlackMembers\Pages;
 use App\Enums\Integration;
 use App\Filament\Pages\AffiliateInvoices;
 use App\Filament\Pages\Contracts;
+use App\Filament\Pages\Finance\Signals;
 use App\Filament\Resources\MessageTemplates\MessageTemplateResource;
 use App\Filament\Resources\SlackMembers\SlackMemberResource;
 use App\Filament\Resources\SlackMembers\Widgets\AffiliateSlackChannels;
@@ -12,6 +13,7 @@ use App\Models\SlackMember;
 use App\Services\IntegrationErrorLogger;
 use App\Services\Slack;
 use App\Support\ContractReminder;
+use App\Support\FinanceAlerts;
 use App\Support\InvoiceReminder;
 use App\Support\SlackMessagePreview;
 use Filament\Actions\Action;
@@ -41,6 +43,7 @@ class ManageSlackMembers extends ManageRecords
         return [
             $this->invoiceReminderAction(),
             $this->contractReminderAction(),
+            $this->financeAlertsAction(),
             CreateAction::make()
                 ->successNotificationTitle(fn (SlackMember $record): string => "Slack member {$record->name} added"),
         ];
@@ -184,6 +187,86 @@ class ManageSlackMembers extends ManageRecords
                     ->title('Contract reminder saved')
                     ->body($data['enabled'] ? "Contracts that are not signed after {$data['days']} days get a reminder." : 'Contract reminders are turned off.')
                     ->send();
+            });
+    }
+
+    /**
+     * Finance signals in the #finance channel: budgets, subscriptions and possible duplicate or unusual payments, with
+     * a message per kind and a test message.
+     */
+    protected function financeAlertsAction(): Action
+    {
+        return Action::make('financeAlerts')
+            ->label('Finance alerts')
+            ->icon(Heroicon::OutlinedBanknotes)
+            ->color('gray')
+            ->modalHeading('Finance-meldingen')
+            ->modalDescription('Elke ochtend om 08:45 gaan nieuwe finance-signalen in één bericht naar Slack. Elk signaal wordt één keer gestuurd; ze staan allemaal onder Finance → Signalen.')
+            ->modalWidth('3xl')
+            ->modalSubmitActionLabel('Opslaan')
+            ->modalCancelActionLabel('Annuleren')
+            ->fillForm(fn (): array => FinanceAlerts::settings())
+            ->schema([
+                Toggle::make('enabled')
+                    ->label('Finance-meldingen versturen')
+                    ->live(),
+                static::channelField()
+                    ->label('Slack-kanaal-ID (#finance)')
+                    ->helperText('In Slack: open het kanaal → kanaalnaam → Info, onderaan staat de ID. Nodig de bot uit in het kanaal met /invite.')
+                    ->validationMessages(['regex' => 'Een kanaal-ID begint met C (of G bij oudere privékanalen), bijv. C0123456789.']),
+                Grid::make(2)->schema([
+                    Toggle::make('payments')
+                        ->label('Bankbetalingen zonder betaalde Plug & Pay-order'),
+                    Toggle::make('budgets')
+                        ->label('Budget overschreden'),
+                    Toggle::make('subscriptions')
+                        ->label('Nieuwe of duurdere abonnementen'),
+                    Toggle::make('anomalies')
+                        ->label('Mogelijk dubbele of ongewoon hoge betalingen'),
+                ]),
+                ...collect(FinanceAlerts::Kinds)->map(fn (array $kind, string $type): Textarea => Textarea::make("messages.{$type}")
+                    ->label($kind['label'])
+                    ->rows($type === 'intro' ? 3 : 1)
+                    ->autosize()
+                    ->required()
+                    ->maxLength(1000)
+                    ->live(debounce: 400)
+                    ->helperText(MessageTemplateResource::placeholderList($kind['placeholders'], $type === 'intro' ? 'Gebruik *tekst* voor vet, zoals in Slack.' : null)))->values()->all(),
+                TextEntry::make('preview')
+                    ->label('Voorbeeld')
+                    ->state(fn (Get $get): Htmlable => SlackMessagePreview::html(FinanceAlerts::example(Signals::getUrl(), $get('messages')))),
+            ])
+            ->extraModalFooterActions([
+                Action::make('sendFinanceAlertTest')
+                    ->label('Testbericht sturen')
+                    ->icon(Heroicon::OutlinedPaperAirplane)
+                    ->color('gray')
+                    ->action(function (Action $parentAction, Slack $slack, IntegrationErrorLogger $errorLogger): void {
+                        $data = $parentAction->getRawData();
+                        $channel = trim((string) ($data['channel'] ?? ''));
+
+                        if (! $slack->isConfigured() || $channel === '') {
+                            Notification::make()->warning()->title('Slack is niet ingesteld')->body('Vul een kanaal-ID in en zorg dat de Slack-bot is gekoppeld.')->send();
+
+                            return;
+                        }
+
+                        try {
+                            $slack->postMessage($channel, "_Testbericht_\n".FinanceAlerts::example(Signals::getUrl(), $data['messages'] ?? null));
+                        } catch (Throwable $exception) {
+                            $errorLogger->record(Integration::Slack, 'Send finance alerts test message', $exception);
+                            Notification::make()->danger()->title('Testbericht niet verstuurd')->body($exception->getMessage())->send();
+
+                            return;
+                        }
+
+                        Notification::make()->success()->title('Testbericht verstuurd')->body("Kijk in Slack-kanaal {$channel}.")->send();
+                    }),
+            ])
+            ->action(function (array $data): void {
+                FinanceAlerts::save($data);
+
+                Notification::make()->success()->title('Finance-meldingen opgeslagen')->send();
             });
     }
 

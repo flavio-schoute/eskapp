@@ -51,6 +51,14 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * Admins and editors ("bewerkers") can use Finance.
+     */
+    public function canUseFinance(): bool
+    {
+        return $this->role?->canUseFinance() ?? false;
+    }
+
+    /**
      * Only e-Skool staff (an @e-skool.nl email address) may use the admin panel.
      */
     public function canAccessPanel(Panel $panel): bool

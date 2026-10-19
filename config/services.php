@@ -35,11 +35,6 @@ return [
         'affiliates_folder_id' => env('GOOGLE_DRIVE_AFFILIATES_FOLDER_ID'),
     ],
 
-    'finance_dashboard' => [
-        // Opened from "Finance" in the panel navigation.
-        'url' => env('FINANCE_DASHBOARD_URL', 'https://finance-app-nu-orpin-25.vercel.app'),
-    ],
-
     'esignatures' => [
         'secret_token' => env('ESIGNATURES_SECRET_TOKEN'),
         // The ID shown when editing the affiliate contract template in eSignatures.
