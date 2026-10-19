@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Table('finance_orders')]
 #[Fillable([
-    'external_id', 'plug_and_pay_order_id', 'order_ref', 'plug_and_pay_product_id', 'sku', 'product_name', 'quantity',
+    'external_id', 'import_id', 'plug_and_pay_order_id', 'order_ref', 'plug_and_pay_product_id', 'sku', 'product_name', 'quantity',
     'subtotal_ex_vat_cents', 'vat_cents', 'total_cents', 'status', 'invoiced_on', 'paid_on', 'customer_email', 'synced_at',
 ])]
 class Order extends Model

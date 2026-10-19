@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Finance\Transactions;
 
+use App\Enums\Finance\AccountType;
 use App\Enums\Finance\CategoryKind;
 use App\Enums\Finance\TransactionStatus;
 use App\Filament\Concerns\FinanceOnly;
@@ -35,6 +36,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Js;
 use InvalidArgumentException;
 use UnitEnum;
 
@@ -110,7 +112,7 @@ class TransactionResource extends Resource
     public static function configureTransactionTable(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['account:id,name', 'splits.category']))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['account:id,name', 'category:id,name,description', 'splits.category']))
             // Always also sort on the ID, so a line never jumps to another place after it was categorized.
             ->defaultSort(fn (Builder $query): Builder => $query->orderByDesc('booked_on')->orderByDesc('id'))
             ->paginated([25, 50, 100, 250])
@@ -168,6 +170,10 @@ class TransactionResource extends Resource
                     ->options(fn (): array => Category::pickerOptions())
                     ->placeholder(fn (Transaction $record): string => $record->splits->isNotEmpty() ? 'Gesplitst ('.$record->splits->count().' delen)' : 'Kies categorie…')
                     ->disabled(fn (Transaction $record): bool => $record->splits->isNotEmpty())
+                    // The searchable select ignores tooltip(): show the category's explanation on the cell instead.
+                    ->extraCellAttributes(fn (Transaction $record): array => filled($record->category?->description)
+                        ? ['x-data' => '{}', 'x-tooltip' => '{ content: '.Js::from($record->category->description).', theme: $store.theme }']
+                        : [])
                     ->searchableOptions()
                     ->updateStateUsing(function (?string $state, Transaction $record): ?string {
                         if (! $state) {
@@ -184,10 +190,7 @@ class TransactionResource extends Resource
                             Notification::make()->danger()->title($exception->getMessage())->send();
                         }
 
-                        // The revenue of an order already counts; booking its bank line as revenue counts it twice.
-                        if ($category->kind === CategoryKind::Revenue && $record->order_ref !== null) {
-                            Notification::make()->warning()->persistent()->title('Let op: dubbele omzet')->body("Deze bijschrijving hoort bij Plug & Pay-order {$record->order_ref}, en die omzet telt al mee. Boek hem op Klantbetaling per bank (Plug & Pay).")->send();
-                        }
+                        static::warnAboutDoubleRevenue($category, array_filter([$record->order_ref]));
 
                         return $state;
                     }),
@@ -201,23 +204,27 @@ class TransactionResource extends Resource
                         PaymentMatcher::Paid => "{$record->order_ref} betaald",
                         PaymentMatcher::Open => "{$record->order_ref} staat open",
                         PaymentMatcher::None => 'Geen order',
+                        PaymentMatcher::Credited => "{$record->order_ref} gecrediteerd · telt niet mee",
                         default => null,
                     })
                     ->color(fn (?string $state): string => match ($state) {
                         PaymentMatcher::Paid => 'success',
                         PaymentMatcher::Open => 'warning',
+                        PaymentMatcher::Credited => 'info',
                         default => 'gray',
                     })
                     ->icon(fn (?string $state): ?Heroicon => match ($state) {
                         PaymentMatcher::Paid => Heroicon::OutlinedCheckCircle,
                         PaymentMatcher::Open => Heroicon::OutlinedExclamationTriangle,
                         PaymentMatcher::None => Heroicon::OutlinedQuestionMarkCircle,
+                        PaymentMatcher::Credited => Heroicon::OutlinedReceiptRefund,
                         default => null,
                     })
                     ->tooltip(fn (?string $state): ?string => match ($state) {
                         PaymentMatcher::Paid => 'Deze bijschrijving hoort bij een betaalde Plug & Pay-order: de omzet telt al mee via de order. Boek hem op Klantbetaling per bank.',
                         PaymentMatcher::Open => 'Het geld is binnen, maar de order staat in Plug & Pay nog open. Zet de order op betaald, anders telt de omzet niet mee.',
                         PaymentMatcher::None => 'Geen Plug & Pay-order gevonden op factuurnummer of bedrag.',
+                        PaymentMatcher::Credited => 'Terugbetaling van een factuur die in Plug & Pay helemaal is gecrediteerd. De creditering haalde de omzet al weg, dus deze terugbetaling telt niet nog een keer als kosten.',
                         default => null,
                     })
                     ->placeholder('')
@@ -226,6 +233,7 @@ class TransactionResource extends Resource
             ->recordActions([
                 static::detailsAction(),
                 static::splitAction(),
+                static::deleteManualAction(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
@@ -233,16 +241,22 @@ class TransactionResource extends Resource
                         ->label('Categorie toewijzen')
                         ->icon(Heroicon::OutlinedTag)
                         ->schema([
-                            Select::make('category_id')->label('Categorie')->options(fn (): array => Category::pickerOptions())->searchable()->required(),
+                            static::categoryField(),
                             Select::make('vat_rate')->label('Btw')->options(['' => 'Standaard', '0.21' => '21%', '0.09' => '9%', '0' => '0%'])->default('')->selectablePlaceholder(false),
                         ])
                         ->action(function (Collection $records, array $data): void {
+                            $category = Category::findOrFail($data['category_id']);
+
                             try {
-                                $count = app(Bookkeeping::class)->setCategory($records->modelKeys(), Category::findOrFail($data['category_id']), static::user(), $data['vat_rate'] === '' ? null : (float) $data['vat_rate']);
+                                $count = app(Bookkeeping::class)->setCategory($records->modelKeys(), $category, static::user(), $data['vat_rate'] === '' ? null : (float) $data['vat_rate']);
                                 Notification::make()->success()->title("{$count} transacties gecategoriseerd")->send();
                             } catch (InvalidArgumentException $exception) {
                                 Notification::make()->danger()->title($exception->getMessage())->send();
+
+                                return;
                             }
+
+                            static::warnAboutDoubleRevenue($category, $records->pluck('order_ref')->filter()->unique()->values()->all());
                         })
                         ->deselectRecordsAfterCompletion(),
                     BulkAction::make('confirm')
@@ -396,6 +410,126 @@ class TransactionResource extends Resource
 
                 Notification::make()->success()->title($splits === [] ? 'Splitsing verwijderd' : 'Gesplitst in '.count($splits).' delen')->send();
             });
+    }
+
+    /**
+     * Add an invoice by hand, e.g. Mollie costs that are deducted from the payouts.
+     */
+    public static function addInvoiceAction(): Action
+    {
+        return Action::make('addInvoice')
+            ->label('Factuur toevoegen')
+            ->icon(Heroicon::OutlinedDocumentPlus)
+            ->modalHeading('Factuur handmatig toevoegen')
+            ->modalDescription('Voor kosten die niet als losse regel op de bank staan, zoals Mollie-facturen die op de uitbetalingen worden ingehouden. Telt mee in de W&V op de factuurdatum.')
+            ->modalSubmitActionLabel('Toevoegen')
+            ->modalCancelActionLabel('Annuleren')
+            ->fillForm(fn (): array => [
+                'booked_on' => now()->toDateString(),
+                'direction' => 'out',
+                'vat_rate' => '',
+            ])
+            ->schema([
+                Grid::make(2)->schema([
+                    DatePicker::make('booked_on')->label('Factuurdatum')->required(),
+                    TextInput::make('counterparty_name')->label('Leverancier')->placeholder('bijv. Mollie')->required()->maxLength(500),
+                    TextInput::make('description')->label('Factuurnummer / omschrijving')->maxLength(500),
+                    Select::make('direction')->label('Soort')->options(['out' => 'Kosten', 'in' => 'Inkomsten'])->selectablePlaceholder(false)->required(),
+                    TextInput::make('amount')->label('Bedrag incl. btw')->prefix('€')->numeric()->minValue(0.01)->required(),
+                    Select::make('vat_rate')->label('Btw')->options(['' => 'Standaard van de categorie', ...static::VatRates, 'amount' => 'Ander bedrag (zoals op de factuur)'])->default('')->selectablePlaceholder(false)->live(),
+                    TextInput::make('vat_amount')
+                        ->label('Btw-bedrag')
+                        ->prefix('€')
+                        ->numeric()
+                        ->minValue(0)
+                        ->lte('amount')
+                        ->required()
+                        ->visible(fn (Get $get): bool => $get('vat_rate') === 'amount')
+                        ->helperText(fn (Get $get): ?string => is_numeric($get('amount')) && is_numeric($get('vat_amount')) ? 'Excl. btw: '.Money::format(Money::round(((float) $get('amount') - (float) $get('vat_amount')) * 100)) : null)
+                        ->live(debounce: 400),
+                    static::categoryField()->columnSpanFull(),
+                ]),
+            ])
+            ->action(function (array $data, Bookkeeping $bookkeeping): void {
+                $cents = Money::round((float) $data['amount'] * 100);
+
+                try {
+                    $bookkeeping->addManual([
+                        // Not a bank movement (e.g. deducted from a payout): always on the manual account.
+                        'account_id' => Account::query()->firstOrCreate(['type' => AccountType::Manual], ['name' => 'Handmatig'])->getKey(),
+                        'booked_on' => $data['booked_on'],
+                        'counterparty_name' => trim($data['counterparty_name']),
+                        'description' => $data['description'] ?? null,
+                        'amount_cents' => $data['direction'] === 'in' ? $cents : -$cents,
+                        'category_id' => (int) $data['category_id'],
+                        'vat_rate' => in_array($data['vat_rate'] ?? '', ['', 'amount'], true) ? null : (float) $data['vat_rate'],
+                        'vat_cents' => ($data['vat_rate'] ?? '') === 'amount' ? Money::round((float) $data['vat_amount'] * 100) : null,
+                    ], static::user());
+                } catch (InvalidArgumentException $exception) {
+                    Notification::make()->danger()->title($exception->getMessage())->send();
+
+                    return;
+                }
+
+                Notification::make()->success()->title('Factuur toegevoegd')->body('Hij telt mee in de W&V en staat bij Transacties.')->send();
+            });
+    }
+
+    /**
+     * Delete a line that was added by hand.
+     */
+    public static function deleteManualAction(): Action
+    {
+        return Action::make('deleteManual')
+            ->label('Verwijderen')
+            ->icon(Heroicon::OutlinedTrash)
+            ->iconButton()
+            ->color('danger')
+            ->tooltip('Handmatige factuur verwijderen')
+            ->visible(fn (Transaction $record): bool => $record->mutation_type === 'manual')
+            ->requiresConfirmation()
+            ->modalHeading(fn (Transaction $record): string => "Factuur van {$record->counterparty_name} verwijderen?")
+            ->modalDescription('De regel wordt verwijderd en telt niet meer mee in de W&V.')
+            ->action(function (Transaction $record): void {
+                $record->delete();
+
+                Notification::make()->success()->title('Factuur verwijderd')->send();
+            });
+    }
+
+    /**
+     * The category picker, with the chosen category's explanation underneath.
+     */
+    public static function categoryField(string $name = 'category_id'): Select
+    {
+        return Select::make($name)
+            ->label('Categorie')
+            ->options(fn (): array => Category::pickerOptions())
+            ->searchable()
+            ->required()
+            ->live()
+            ->helperText(fn (mixed $state): ?string => filled($state) ? Category::query()->whereKey($state)->value('description') : null);
+    }
+
+    /**
+     * The revenue of an order already counts; booking its bank line as revenue counts it twice.
+     *
+     * @param  list<string>  $orderRefs  The Plug&Pay orders the lines are linked to.
+     */
+    public static function warnAboutDoubleRevenue(Category $category, array $orderRefs): void
+    {
+        if ($category->kind !== CategoryKind::Revenue || $orderRefs === []) {
+            return;
+        }
+
+        $orders = count($orderRefs) === 1 ? "Plug & Pay-order {$orderRefs[0]}" : count($orderRefs).' Plug & Pay-orders ('.implode(', ', array_slice($orderRefs, 0, 5)).(count($orderRefs) > 5 ? ', …' : '').')';
+
+        Notification::make()
+            ->warning()
+            ->persistent()
+            ->title('Let op: dubbele omzet')
+            ->body((count($orderRefs) === 1 ? 'Deze bijschrijving hoort' : 'Deze bijschrijvingen horen')." bij {$orders}, en die omzet telt al mee. Boek ze op Klantbetaling per bank (Plug & Pay).")
+            ->send();
     }
 
     public static function user(): ?User

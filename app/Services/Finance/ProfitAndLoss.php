@@ -157,6 +157,8 @@ class ProfitAndLoss
             ->whereIn('status', [TransactionStatus::Auto, TransactionStatus::Confirmed])
             ->whereNotNull('category_id')
             ->whereDoesntHave('splits')
+            // A refund of an invoice credited in Plug&Pay: the credit already took the revenue away.
+            ->where(fn ($query) => $query->whereNull('order_match')->orWhere('order_match', '!=', PaymentMatcher::Credited))
             ->get(['booked_on', 'period_on', 'category_id', 'amount_cents', 'amount_ex_vat_cents'])
             ->each(function (Transaction $line) use (&$totals): void {
                 $key = $line->plMonth().'|'.$line->category_id;

@@ -11,6 +11,11 @@ class ListTransactions extends ListRecords
 {
     protected static string $resource = TransactionResource::class;
 
+    protected function getHeaderActions(): array
+    {
+        return [TransactionResource::addInvoiceAction()];
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
         return number_format(Transaction::query()->count(), 0, ',', '.').' regels';

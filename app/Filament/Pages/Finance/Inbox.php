@@ -137,7 +137,7 @@ class Inbox extends Page implements HasTable
                     ->schema([
                         TextInput::make('name')->label('Naam')->required()->maxLength(120),
                         TextInput::make('value')->label('Tegenpartij is')->required()->maxLength(300),
-                        Select::make('category_id')->label('Categorie')->options(fn (): array => Category::pickerOptions())->searchable()->required(),
+                        TransactionResource::categoryField(),
                         Select::make('vat_rate')->label('Btw')->options(['' => 'Standaard', ...TransactionResource::VatRates])->default('')->selectablePlaceholder(false),
                     ])
                     ->action(function (Transaction $record, array $data, Bookkeeping $bookkeeping): void {

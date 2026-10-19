@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * A main group (no parent) or a subcategory. Transactions always get a subcategory; the P&L adds them up per group.
  */
 #[Table('finance_categories')]
-#[Fillable(['parent_id', 'name', 'code', 'kind', 'fixed_variable', 'default_vat_rate', 'below_operating', 'revenue_stream_id', 'is_ad_spend', 'monthly_budget_cents', 'color', 'sort_order', 'archived'])]
+#[Fillable(['parent_id', 'name', 'description', 'code', 'kind', 'fixed_variable', 'default_vat_rate', 'below_operating', 'revenue_stream_id', 'is_ad_spend', 'monthly_budget_cents', 'color', 'sort_order', 'archived'])]
 class Category extends Model
 {
     /** @use HasFactory<CategoryFactory> */

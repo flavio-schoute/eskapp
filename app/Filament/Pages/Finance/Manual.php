@@ -3,8 +3,10 @@
 namespace App\Filament\Pages\Finance;
 
 use App\Filament\Concerns\FinanceOnly;
+use App\Filament\Resources\Finance\Categories\CategoryResource;
 use App\Filament\Resources\Finance\Rules\RuleResource;
 use App\Filament\Resources\Finance\Transactions\TransactionResource;
+use App\Filament\Resources\SlackMembers\SlackMemberResource;
 use BackedEnum;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
@@ -48,6 +50,9 @@ class Manual extends Page
             'dashboard' => FinanceDashboard::getUrl(),
             'transactions' => TransactionResource::getUrl(),
             'rules' => RuleResource::getUrl(),
+            'signals' => Signals::getUrl(),
+            'categories' => CategoryResource::getUrl(),
+            'slackSettings' => SlackMemberResource::getUrl(),
         ];
     }
 }

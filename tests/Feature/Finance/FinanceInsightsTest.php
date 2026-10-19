@@ -1,7 +1,9 @@
 <?php
 
+use App\Enums\Finance\AccountType;
 use App\Enums\Finance\TransactionStatus;
 use App\Filament\Pages\Finance\Signals as SignalsPage;
+use App\Filament\Resources\Finance\Transactions\Pages\ListTransactions;
 use App\Filament\Resources\SlackMembers\Pages\ManageSlackMembers;
 use App\Filament\Widgets\Finance\FinanceStats;
 use App\Filament\Widgets\Finance\StreamMarginTable;
@@ -158,4 +160,37 @@ it('changes the finance alert messages and sends a test message from the Slack s
         && str_contains($request['text'], 'Budget overschreden'));
 
     expect(FinanceAlerts::render('duplicate', ['{bedrag}' => '€ 5', '{partij}' => 'X']))->toBe('Dubbel? € 5 aan X');
+});
+
+it('adds an invoice by hand so it counts in the costs, and deletes it', function () {
+    $category = Category::firstWhere('code', '400');
+
+    Livewire::test(ListTransactions::class)
+        ->callAction('addInvoice', [
+            'booked_on' => '2026-10-01', 'counterparty_name' => 'Mollie', 'description' => 'MOL-NL-R2026.0001379748',
+            'direction' => 'out', 'amount' => '121', 'vat_rate' => '0.21', 'category_id' => $category->id,
+        ])
+        ->assertHasNoFormErrors()
+        ->assertNotified('Factuur toegevoegd');
+
+    expect(Transaction::sole()->account->type)->toBe(AccountType::Manual)
+        ->and(Transaction::sole())->amount_cents->toBe(-12100)->amount_ex_vat_cents->toBe(-10000)
+        ->status->toBe(TransactionStatus::Confirmed);
+
+    Livewire::test(ListTransactions::class)
+        ->callAction(TestAction::make('deleteManual')->table(Transaction::sole()))
+        ->assertNotified('Factuur verwijderd');
+
+    expect(Transaction::count())->toBe(0);
+});
+
+it('adds an invoice by hand with the exact VAT amount from the invoice', function () {
+    Livewire::test(ListTransactions::class)
+        ->callAction('addInvoice', [
+            'booked_on' => '2026-10-01', 'counterparty_name' => 'Mollie', 'direction' => 'out', 'amount' => '250',
+            'vat_rate' => 'amount', 'vat_amount' => '10.50', 'category_id' => Category::firstWhere('code', '400')->id,
+        ])
+        ->assertHasNoFormErrors();
+
+    expect(Transaction::sole())->amount_cents->toBe(-25000)->amount_ex_vat_cents->toBe(-23950)->vat_rate->toBe(0.044);
 });

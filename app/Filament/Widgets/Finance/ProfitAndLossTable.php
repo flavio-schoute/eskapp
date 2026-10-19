@@ -9,6 +9,7 @@ use App\Models\Finance\Transaction;
 use App\Models\Finance\TransactionSplit;
 use App\Services\Finance\FinanceReport;
 use App\Services\Finance\Money;
+use App\Services\Finance\PaymentMatcher;
 use App\Services\Finance\ProfitAndLoss;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
@@ -107,6 +108,7 @@ class ProfitAndLossTable extends Widget implements HasActions, HasSchemas
             'previous' => $previous,
             'cell' => $cell,
             'monthLabel' => FinanceReport::monthLabel(...),
+            'descriptions' => Category::query()->whereNotNull('description')->pluck('description', 'id')->all(),
             'streamProducts' => collect($this->expandedStreams)->mapWithKeys(fn (string $streamId): array => [$streamId => $this->streamProducts($streamId, $months[0], end($months))])->all(),
             'lineTransactions' => collect($this->expandedLines)->mapWithKeys(fn (int $categoryId): array => [$categoryId => $this->drilldownRows($categoryId, $months[0], end($months))])->all(),
         ];
@@ -179,6 +181,7 @@ class ProfitAndLossTable extends Widget implements HasActions, HasSchemas
             ->where('category_id', $categoryId)
             ->whereIn('status', [TransactionStatus::Auto, TransactionStatus::Confirmed])
             ->whereDoesntHave('splits')
+            ->where(fn ($query) => $query->whereNull('order_match')->orWhere('order_match', '!=', PaymentMatcher::Credited))
             ->where($inPeriod)
             ->orderByDesc('booked_on')
             ->limit(500)

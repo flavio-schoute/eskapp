@@ -3,9 +3,12 @@
 use App\Filament\Resources\Products\Pages\ListProducts;
 use App\Filament\Resources\Products\ProductResource;
 use App\Jobs\SyncProducts;
+use App\Models\Finance\Order;
+use App\Models\Finance\RevenueStream;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\ProductSync;
+use App\Support\Finance\ProductStreams;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -57,6 +60,24 @@ it('keeps the in use choice made in the app when syncing again', function () {
     app(ProductSync::class)->sync();
 
     expect(Product::sole()->in_use)->toBeFalse();
+});
+
+it('takes over a changed SKU in the finance order lines and links export lines to the product', function () {
+    Product::factory()->create(['plug_and_pay_product_id' => 321827, 'sku' => '259254', 'revenue_stream_id' => null]);
+    Order::create(['external_id' => '1#1', 'plug_and_pay_order_id' => 1, 'order_ref' => 'ESKOOL1', 'plug_and_pay_product_id' => 321827, 'sku' => '259254', 'subtotal_ex_vat_cents' => 100, 'status' => 'paid']);
+    Order::create(['external_id' => '2#sku-888999-1', 'plug_and_pay_order_id' => 2, 'order_ref' => 'ESKOOL2', 'sku' => '888999', 'subtotal_ex_vat_cents' => 100, 'status' => 'paid']);
+    Http::fake([
+        'api.plugandpay.com/v2/products?*is_deleted=1*' => Http::response(['data' => [], 'meta' => ['last_page' => 1]]),
+        'api.plugandpay.com/v2/products*' => Http::response(['data' => [['id' => 321827, 'title' => 'HRM', 'sku' => '888999']], 'meta' => ['last_page' => 1]]),
+        'api.plugandpay.com/v2/orders*' => Http::response(['data' => [], 'meta' => ['last_page' => 1]]),
+    ]);
+
+    app(ProductSync::class)->sync();
+
+    expect(Order::firstWhere('external_id', '1#1')->sku)->toBe('888999')
+        ->and(Order::firstWhere('external_id', '2#sku-888999-1')->plug_and_pay_product_id)->toBe(321827)
+        // No stream yet: the new SKU's stream is picked up.
+        ->and(Product::sole()->revenue_stream_id)->toBe(RevenueStream::firstWhere('name', ProductStreams::streamFor('888999'))?->id);
 });
 
 it('lists the products in use and not in use in separate tabs', function () {

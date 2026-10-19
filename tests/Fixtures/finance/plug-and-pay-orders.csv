@@ -1,0 +1,6 @@
+order_id,product,quantity,sku,email,invoice_number,invoice_date,amount,amount_with_tax,paid_at,payment_status
+18668990,Van consument naar ondernemer traject,1,888999,klant@example.com,ESKOOL202602731,2026-10-19,3500,4235,2026-10-19 12:36:38,paid
+18668991,Event ticket,2,530222,event@example.com,ESKOOL202602732,2026-10-18,200,242,2026-10-18 22:45:00,paid
+18668991,Workbook,1,530223,event@example.com,ESKOOL202602732,2026-10-18,50,60.5,2026-10-18 22:45:00,paid
+18668992,Van consument naar ondernemer traject,1,888999,open@example.com,ESKOOL202602733,2026-10-19,1166.67,1166.67,,processing
+18668993,Concept zonder factuur,1,888999,concept@example.com,,,100,121,,open

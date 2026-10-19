@@ -39,6 +39,9 @@ class OrderSync
             $paidAt = Arr::get($order, 'payment.paid_at');
             $status = Arr::get($order, 'payment.status') ?? 'open';
 
+            // Lines from a manually uploaded export are replaced by the API's own lines.
+            Order::query()->where('plug_and_pay_order_id', $order['id'])->where('external_id', 'like', '%#sku-%')->delete();
+
             foreach ($order['items'] ?? [] as $item) {
                 $externalId = "{$order['id']}#{$item['id']}";
                 $subtotal = Money::parseToCents((string) ($item['amount'] ?? 0));

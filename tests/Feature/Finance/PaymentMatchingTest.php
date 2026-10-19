@@ -9,7 +9,9 @@ use App\Models\Finance\Order;
 use App\Models\Finance\Transaction;
 use App\Models\User;
 use App\Services\Finance\PaymentMatcher;
+use App\Services\Finance\ProfitAndLoss;
 use App\Services\Finance\SignalNotifier;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -99,4 +101,43 @@ it('warns when a bank payment of an order is booked as revenue', function () {
         ->assertSee('ESKOOL202602189 betaald')
         ->call('updateTableColumnState', 'category_id', (string) $line->id, (string) $revenue->id)
         ->assertNotified('Let op: dubbele omzet');
+});
+
+it('also warns when bank payments of orders are booked as revenue in bulk', function () {
+    financeOrder(18210997, 'ESKOOL202602189', 49900, 'paid');
+    $line = bankPayment(49900, 'ESKOOL202602189');
+    app(PaymentMatcher::class)->matchIncoming();
+    $line->refresh()->update(['category_id' => null, 'status' => TransactionStatus::Uncategorized]);
+    $revenue = Category::query()->where('kind', 'revenue')->whereNotNull('parent_id')->first();
+
+    Livewire::test(ListTransactions::class)
+        ->selectTableRecords([$line])
+        ->callAction(TestAction::make('setCategory')->table()->bulk(), data: ['category_id' => $revenue->id, 'vat_rate' => ''])
+        ->assertNotified('Let op: dubbele omzet');
+});
+
+it('leaves refunds of invoices credited in Plug&Pay out of the costs, and counts other refunds', function () {
+    Order::create(['external_id' => '18650969#1', 'plug_and_pay_order_id' => 18650969, 'order_ref' => 'ESKOOL202602716', 'subtotal_ex_vat_cents' => 84700, 'total_cents' => 84700, 'status' => 'credited', 'invoiced_on' => '2026-09-17']);
+    Order::create(['external_id' => '18650982#1', 'plug_and_pay_order_id' => 18650982, 'order_ref' => 'ESKOOL202602717', 'subtotal_ex_vat_cents' => 15000, 'total_cents' => 18150, 'status' => 'credited', 'invoiced_on' => '2026-09-17']);
+    $refunds = Category::firstWhere('code', PaymentMatcher::RefundCategoryCode);
+    $byInvoice = bankPayment(-84700, 'Terugbetaling factuur ESKOOL202602716');
+    $byAmount = bankPayment(-18150, 'Terugbetaling aanbetaling', ['category_id' => $refunds->id, 'status' => TransactionStatus::Confirmed, 'amount_ex_vat_cents' => -15000]);
+    $partial = bankPayment(-12100, 'Deel terug, creditnota CN-2026-001', ['category_id' => $refunds->id, 'status' => TransactionStatus::Confirmed, 'amount_ex_vat_cents' => -10000]);
+
+    app(PaymentMatcher::class)->matchIncoming();
+
+    expect($byInvoice->fresh())->order_ref->toBe('ESKOOL202602716')->order_match->toBe('credited')
+        ->category_id->toBe($refunds->id)->status->toBe(TransactionStatus::Auto)
+        ->and($byAmount->fresh())->order_ref->toBe('ESKOOL202602717')->order_match->toBe('credited')
+        ->and($partial->fresh()->order_match)->toBeNull();
+
+    // Only the partial refund counts as a cost.
+    expect(ProfitAndLoss::fromDatabase()['costs'])->toBe(['2026-10' => 10000]);
+
+    Livewire::test(ListTransactions::class)->assertSee('ESKOOL202602716 gecrediteerd · telt niet mee');
+
+    // Booked on another category: no longer treated as a refund.
+    $byInvoice->update(['category_id' => Category::firstWhere('code', '400')->id, 'status' => TransactionStatus::Confirmed]);
+    app(PaymentMatcher::class)->matchIncoming();
+    expect($byInvoice->fresh()->order_match)->toBeNull();
 });

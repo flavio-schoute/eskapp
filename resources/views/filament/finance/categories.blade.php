@@ -18,7 +18,7 @@
             <x-filament::section :compact="true" @class(['opacity-60' => $group->archived])>
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
                     <span style="width: 0.65rem; height: 0.65rem; border-radius: 9999px; background: {{ $group->color ?? '#A39E93' }};"></span>
-                    <span style="font-size: 1.05rem; font-weight: 600; flex: 1;">{{ $group->name }}@if ($group->archived) <span style="font-size: 0.75rem; opacity: 0.6;">(gearchiveerd)</span>@endif</span>
+                    <span style="font-size: 1.05rem; font-weight: 600; flex: 1;">{{ $group->name }} <x-finance.info :text="$group->description" />@if ($group->archived) <span style="font-size: 0.75rem; opacity: 0.6;">(gearchiveerd)</span>@endif</span>
                     <x-filament::badge color="gray" size="sm">{{ $group->kind->getLabel() }}</x-filament::badge>
                     <button type="button" class="finance-icon-button" wire:click="mountAction('edit', { category: {{ $group->id }} })" title="Bewerken">
                         <x-filament::icon :icon="\Filament\Support\Icons\Heroicon::OutlinedPencil" style="width: 1rem; height: 1rem;" />
@@ -31,7 +31,13 @@
                 <div style="margin-top: 0.625rem; display: flex; flex-direction: column;">
                     @foreach ($group->children as $category)
                         <div class="finance-category-row" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.5rem; border-radius: 0.375rem; font-size: 0.9rem; {{ $category->archived ? 'opacity: 0.5;' : '' }}">
-                            <span style="flex: 1;">{{ $category->name }}</span>
+                            <span style="flex: 1;">
+                                {{ $category->name }} <x-finance.info :text="$category->description" />
+                                {{-- E.g. a transfer under the Refunds group: say so, it is easy to miss. --}}
+                                @if (! $category->kind->countsInProfitAndLoss() && $group->kind->countsInProfitAndLoss())
+                                    <span style="margin-inline-start: 0.25rem; padding: 0 0.375rem; border-radius: 0.375rem; font-size: 0.7rem; background: rgb(127 127 127 / 0.15); white-space: nowrap;">telt niet mee</span>
+                                @endif
+                            </span>
                             <span style="font-family: ui-monospace, monospace; font-size: 0.75rem; opacity: 0.55;">{{ $category->code }}</span>
                             <span style="font-size: 0.75rem; opacity: 0.55; min-width: 2rem;">{{ $category->default_vat_rate === null ? '' : round($category->default_vat_rate * 100).'%' }}</span>
                             <span class="finance-category-actions" style="display: inline-flex; gap: 0.25rem;">

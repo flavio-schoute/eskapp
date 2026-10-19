@@ -10,6 +10,7 @@ use App\Models\Finance\TransactionSplit;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 /**
@@ -34,6 +35,43 @@ class Bookkeeping
             ...Categorizer::fieldsFor($transaction->amount_cents, $category, TransactionStatus::Confirmed, $vatRate ?? ($transaction->status === TransactionStatus::Uncategorized ? $transaction->vat_rate : null)),
             ...($note !== null ? ['note' => $note] : []),
             'categorized_by' => $user?->getKey(),
+        ]);
+    }
+
+    /**
+     * Add an invoice by hand (e.g. Mollie costs deducted from the payouts) as a confirmed line, so it counts in the P&L.
+     *
+     * The VAT is the category's default, a rate, or the exact amount on the invoice (vat_cents, always positive).
+     *
+     * @param  array{account_id: int, booked_on: string, counterparty_name: string, description: ?string, amount_cents: int, category_id: int, vat_rate: ?float, vat_cents?: ?int}  $data  Costs negative.
+     */
+    public function addManual(array $data, ?User $user): Transaction
+    {
+        $category = Category::findOrFail($data['category_id']);
+        $vatCents = $data['vat_cents'] ?? null;
+
+        if ($vatCents !== null && ($vatCents < 0 || $vatCents > abs($data['amount_cents']))) {
+            throw new InvalidArgumentException('Het btw-bedrag kan niet hoger zijn dan het totaalbedrag.');
+        }
+
+        $fields = Categorizer::fieldsFor($data['amount_cents'], $category, TransactionStatus::Confirmed, $data['vat_rate'] ?? null);
+
+        if ($vatCents !== null) {
+            $exVat = abs($data['amount_cents']) - $vatCents;
+            $fields = [...$fields, 'amount_ex_vat_cents' => $data['amount_cents'] < 0 ? -$exVat : $exVat, 'vat_rate' => $exVat ? round($vatCents / $exVat, 3) : 0.0];
+        }
+
+        return Transaction::create([
+            'account_id' => $data['account_id'],
+            'dedupe_hash' => hash('sha256', 'manual:'.Str::uuid()),
+            'booked_on' => $data['booked_on'],
+            'amount_cents' => $data['amount_cents'],
+            'counterparty_name' => $data['counterparty_name'],
+            'description' => $data['description'] ?? '',
+            'mutation_type' => 'manual',
+            ...$fields,
+            'categorized_by' => $user?->getKey(),
+            'categorized_at' => now(),
         ]);
     }
 

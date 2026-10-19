@@ -47,7 +47,7 @@
                         @php($streamCategory = str_starts_with($stream['id'], 'cat:') ? (int) substr($stream['id'], 4) : null)
                         @php($streamOpen = $streamCategory ? in_array($streamCategory, $this->expandedLines, true) : in_array($stream['id'], $this->expandedStreams, true))
                         <tr wire:click="{{ $streamCategory ? "toggleLine({$streamCategory})" : "toggleStream('{$stream['id']}')" }}" title="{{ $streamCategory ? 'Klik voor de transacties' : 'Klik voor de producten' }}" style="border-bottom: 1px solid rgb(127 127 127 / 0.12); cursor: pointer; {{ $streamOpen ? 'background: rgb(127 127 127 / 0.06);' : '' }}">
-                            <td style="{{ $nameStyle }} padding-inline-start: 1.5rem; font-weight: 500; {{ $stream['id'] === \App\Services\Finance\ProfitAndLoss::UnmappedStream ? 'color: #D97706;' : '' }}">{{ $stream['name'] }}</td>
+                            <td style="{{ $nameStyle }} padding-inline-start: 1.5rem; font-weight: 500; {{ $stream['id'] === \App\Services\Finance\ProfitAndLoss::UnmappedStream ? 'color: #D97706;' : '' }}">{{ $stream['name'] }} @if ($streamCategory)<x-finance.info :text="$descriptions[$streamCategory] ?? null" />@endif</td>
                             @foreach ($months as $month)
                                 <td style="{{ $cellStyle }}">
                                     @if (str_starts_with($stream['id'], 'cat:') && ($stream['byMonth'][$month] ?? 0) !== 0)

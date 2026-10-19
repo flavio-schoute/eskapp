@@ -11,6 +11,7 @@ use App\Services\Finance\Money;
 use BackedEnum;
 use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
@@ -59,6 +60,13 @@ class CategoryResource extends Resource
                     ->label('Naam')
                     ->required()
                     ->maxLength(80),
+                Textarea::make('description')
+                    ->label('Uitleg (optioneel)')
+                    ->placeholder('Wanneer gebruik je deze categorie, en telt hij mee in de W&V?')
+                    ->helperText('Zichtbaar als je met de muis over het ⓘ-icoon gaat, en onder de categoriekeuze.')
+                    ->rows(2)
+                    ->autosize()
+                    ->maxLength(1000),
                 Select::make('parent_id')
                     ->label('Hoofdgroep')
                     ->placeholder('Geen: dit is zelf een hoofdgroep')

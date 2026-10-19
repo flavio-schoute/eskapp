@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Models\Finance\Order;
 use App\Models\Finance\RevenueStream;
 use App\Models\Product;
 use App\Support\Finance\ProductStreams;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Fetches the products from Plug&Pay, also the deleted ones, with how often and how recently each was ordered (from
@@ -45,6 +47,10 @@ class ProductSync
 
                 if (! $product->exists) {
                     $product->in_use = in_array((int) $remote['id'], Product::InUseByDefault, true);
+                }
+
+                // New products, and products whose SKU changed and have no revenue stream yet, get one from their SKU.
+                if ($product->revenue_stream_id === null) {
                     $product->revenue_stream_id = $streams[ProductStreams::streamFor($remote['sku'] ?? null)] ?? null;
                 }
 
@@ -68,9 +74,37 @@ class ProductSync
         // Products are never removed: their orders still count as revenue in Finance.
         Product::query()->whereNotIn('plug_and_pay_product_id', $syncedIds)->whereNull('deleted_in_plug_and_pay_at')->update(['deleted_in_plug_and_pay_at' => now()]);
 
+        static::relinkOrders();
+
         return [
             'products' => Product::query()->whereNull('deleted_in_plug_and_pay_at')->count(),
             'never_ordered' => Product::query()->whereNull('deleted_in_plug_and_pay_at')->where('orders_count', 0)->count(),
         ];
+    }
+
+    /**
+     * Keep the Finance order lines in step with the products: a changed SKU is copied to the lines, and lines from an
+     * uploaded export whose SKU was unknown then are linked to the product now (the active one when SKUs are shared).
+     */
+    public static function relinkOrders(): void
+    {
+        Order::query()
+            ->whereNotNull('plug_and_pay_product_id')
+            ->update(['sku' => DB::raw('(select products.sku from products where products.plug_and_pay_product_id = finance_orders.plug_and_pay_product_id limit 1)')]);
+
+        $productIds = Product::query()
+            ->whereNotNull('sku')
+            ->orderByRaw('deleted_in_plug_and_pay_at is not null')
+            ->orderByDesc('in_use')
+            ->get(['plug_and_pay_product_id', 'sku'])
+            ->unique('sku')
+            ->pluck('plug_and_pay_product_id', 'sku');
+
+        Order::query()
+            ->whereNull('plug_and_pay_product_id')
+            ->whereIn('sku', $productIds->keys())
+            ->get(['id', 'sku'])
+            ->groupBy('sku')
+            ->each(fn ($orders, int|string $sku) => Order::query()->whereKey($orders->modelKeys())->update(['plug_and_pay_product_id' => $productIds[$sku]]));
     }
 }

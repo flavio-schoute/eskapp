@@ -274,3 +274,23 @@ it('changes the VAT of an open line in the inbox and keeps it when the line gets
         ->vat_rate->toBe(0.09)
         ->amount_ex_vat_cents->toBe(-10000);
 });
+
+it('explains categories on hover: on the categories page, in the P&L and at a transaction', function () {
+    $ads = Category::firstWhere('code', '100');
+
+    Livewire::test(ManageCategories::class)
+        ->callAction(TestAction::make('edit')->arguments(['category' => $ads->id]), ['description' => 'Alleen Google Ads, telt mee in de ROAS.'])
+        ->assertHasNoFormErrors()
+        ->assertSee('Alleen Google Ads, telt mee in de ROAS.');
+
+    expect($ads->fresh()->description)->toBe('Alleen Google Ads, telt mee in de ROAS.');
+
+    $line = Transaction::factory()->create(['category_id' => $ads->id, 'status' => TransactionStatus::Confirmed, 'amount_cents' => -12100, 'amount_ex_vat_cents' => -10000, 'booked_on' => now()->startOfMonth()]);
+
+    Livewire::test(ProfitAndLossTable::class, ['pageFilters' => ['year' => now()->year, 'period' => 'ytd', 'compare' => false]])
+        ->assertSee('Alleen Google Ads, telt mee in de ROAS.');
+
+    Livewire::test(ListTransactions::class)
+        ->assertCanSeeTableRecords([$line])
+        ->assertSee('Alleen Google Ads, telt mee in de ROAS.');
+});
