@@ -61,6 +61,8 @@ class ProductResource extends Resource
                     ->sortable(),
                 TextColumn::make('title')
                     ->description(fn (Product $record): ?string => $record->public_title !== $record->title ? $record->public_title : null)
+                    ->copyable()
+                    ->copyMessage('Title copied')
                     ->searchable(['title', 'public_title', 'sku'])
                     ->wrap()
                     ->sortable(),
